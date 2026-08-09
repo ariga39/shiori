@@ -1,0 +1,34 @@
+# session-memory-pg 数据库启动剧本（Cycle 6 B-C6-01 修复）
+#
+# 官方镜像 + 显式 `-c shared_preload_libraries=vector`，固定 pgvector 的
+# hnsw.ef_search GUC 启动即注册（否则 `SET hnsw.ef_search` 作为会话首语句会被
+# 当 custom placeholder 静默丢弃，ef_search 恒为 40，查询端 clamp 优化失效）。
+#
+# 凭据来源：~/.openclaw/credentials/session-memory-pg.txt（key=value，host/port/
+# dbname/user/password）。本文件不硬编码明文密码，POSTGRES_* 通过 deploy/run.sh
+# 从凭据文件读取后以环境变量注入。
+#
+# 2026-08-03 重建事实：用本剧本重建过容器（官方 pgvector/pgvector:pg17 +
+# `-c shared_preload_libraries=vector`，同数据卷 session-memory-pgdata，端口
+# 127.0.0.1:5433:5432）。回滚（B-C7-01）= 用本剧本重建（数据卷未动）；旧容器
+# session-memory-pg-old 已删除（其 Cmd 无 preload，不适用作安全回滚）。
+
+services:
+  session-memory-pg:
+    image: pgvector/pgvector:pg17
+    container_name: session-memory-pg
+    command: ["postgres", "-c", "shared_preload_libraries=vector"]
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - session-memory-pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB not set — run via deploy/run.sh}"
+      POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER not set — run via deploy/run.sh}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD not set — run via deploy/run.sh}"
+    restart: unless-stopped
+
+volumes:
+  session-memory-pgdata:
+    external: true
+    name: session-memory-pgdata
