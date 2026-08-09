@@ -158,10 +158,16 @@ def _pgpassword(conn) -> str:
 
 
 def _safe_output_path(dest: pathlib.Path) -> None:
-    """Reject overwrite, symlink targets, dangling symlinks, and symlink
-    directory components."""
+    """Reject overwrite, symlink targets, dangling symlinks, symlink directory
+    components, and an already-existing sidecar manifest."""
     if dest.exists() or dest.is_symlink():
         raise MigrationError("backup_target_exists", f"backup target already exists: {dest}")
+    sidecar = dest.with_suffix(dest.suffix + ".manifest.json")
+    if sidecar.exists() or sidecar.is_symlink():
+        raise MigrationError(
+            "backup_manifest_target_exists",
+            f"backup manifest target already exists: {sidecar}",
+        )
     # Reject any symlink in the path's existing components (including a
     # dangling symlink that lstat sees but stat would miss).
     cursor = dest.parent
@@ -182,10 +188,17 @@ def _safe_output_path(dest: pathlib.Path) -> None:
 
 
 def _run_argv(cmd: list[str], env: dict[str, str]) -> None:
+    """Run a child via argv (never a shell).  Failures become stable, redacted
+    repository errors; stderr/DSN/credentials are never surfaced."""
     try:
         subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        raise MigrationError("pg_tool_failed", f"pg tool failed: {exc}") from exc
+    except subprocess.CalledProcessError:
+        raise MigrationError(
+            "pg_tool_failed",
+            f"postgres tool failed: {cmd[0]} (see logs; error redacted)",
+        ) from None
+    except FileNotFoundError as exc:
+        raise MigrationError("pg_tool_missing", f"postgres tool not found: {exc.filename}") from exc
 
 
 def _atomic_write_0600(path: pathlib.Path, data: str) -> None:
@@ -236,19 +249,27 @@ def backup(
 
     env = dict(os.environ)
     env["PGPASSWORD"] = _pgpassword(conn)
-    proc = subprocess.run(
-        [
-            pg_dump,
-            "--format=custom",
-            f"--host={params['host']}",
-            f"--port={params['port']}",
-            f"--username={params['user']}",
-            params["dbname"],
-        ],
-        env=env,
-        check=True,
-        capture_output=True,
-    )
+    try:
+        proc = subprocess.run(
+            [
+                pg_dump,
+                "--format=custom",
+                f"--host={params['host']}",
+                f"--port={params['port']}",
+                f"--username={params['user']}",
+                params["dbname"],
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        raise MigrationError(
+            "pg_tool_failed",
+            f"postgres tool failed: {pg_dump} (see logs; error redacted)",
+        ) from None
+    except FileNotFoundError as exc:
+        raise MigrationError("pg_tool_missing", f"postgres tool not found: {exc.filename}") from exc
     digest = hashlib.sha256(proc.stdout).hexdigest()[:16]
     manifest = {
         "manifest_version": MANIFEST_VERSION,

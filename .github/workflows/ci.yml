@@ -98,6 +98,21 @@ jobs:
             exit 1
           fi
 
+      - name: Verify pg_dump/pg_restore client matches server major version
+        shell: bash
+        run: |
+          set -euo pipefail
+          client_major="$(pg_dump --version | sed -E 's/.* ([0-9]+)\..*/\1/')"
+          server_major="$(
+            psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+              --set ON_ERROR_STOP=1 --tuples-only --no-align \
+              --command 'SHOW server_version_num;' | cut -c1-2
+          )"
+          if [[ "${client_major}" != "${server_major}" ]]; then
+            echo "pg_dump client major ${client_major} != server major ${server_major}" >&2
+            exit 1
+          fi
+
       - name: Prepare isolated database
         shell: bash
         run: |

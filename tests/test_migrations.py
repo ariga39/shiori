@@ -383,3 +383,40 @@ def test_restore_generates_marker_when_omitted(conn, tmp_path: pathlib.Path):
         ["dropdb", "--host=127.0.0.1", "--port=5432", "--username=shiyi_ci", staging],
         env={**os.environ, "PGPASSWORD": "shiyi-ci-only"}, check=True,
     )
+
+
+def test_pg_tool_failure_is_redacted(conn, tmp_path: pathlib.Path):
+    """pg_dump/pg_restore failures must not leak CalledProcessError, stderr,
+    or the DSN/password."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "redact.dump"
+    # Force pg_dump to fail (bad host) so the error must be a stable redacted
+    # MigrationError, not a raw CalledProcessError.
+    # Monkeypatch the DSN params to a bad host.
+    import shiyi.repository as repo
+    from shiyi.repository import backup as backup_fn
+
+    orig = repo._connection_dsn_params
+    repo._connection_dsn_params = lambda c: {"host": "no-such-host.invalid", "port": "1",
+                                             "dbname": "x", "user": "u"}
+    try:
+        with pytest.raises(MigrationError) as exc:
+            backup_fn(conn, dest, migrations_dir=MIGRATIONS_DIR)
+        assert exc.value.code == "pg_tool_failed"
+        # Redacted: no stderr / connection detail / DSN / password leaked.
+        assert "CalledProcessError" not in str(exc.value.message)
+        assert "password" not in str(exc.value.message).lower()
+        assert "shiyi_ci" not in str(exc.value.message)
+    finally:
+        repo._connection_dsn_params = orig
+
+
+def test_backup_refuses_existing_manifest_sidecar(conn, tmp_path: pathlib.Path):
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "sm.dump"
+    dest.with_suffix(dest.suffix + ".manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(MigrationError) as exc:
+        backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    assert exc.value.code == "backup_manifest_target_exists"

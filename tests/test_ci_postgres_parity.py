@@ -27,3 +27,16 @@ def test_ci_preload_gate_is_fail_closed():
     assert "if (( ${#containers[@]} != 1 )); then" in block
     assert "if [[ \"${ready}\" != true ]]; then" in block
     assert "if ! grep -Eq" in block
+
+
+def test_ci_verifies_pg_client_server_major_parity():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "Verify pg_dump/pg_restore client matches server major version" in workflow
+    preload = workflow.index("Verify pg_dump/pg_restore client matches server major version")
+    prepare = workflow.index("name: Prepare isolated database")
+    block = workflow[preload:prepare]
+    assert "pg_dump --version" in block
+    assert "server_version_num" in block
+    assert 'client_major}' in block and 'server_major}' in block
+    assert '!= server major' in block
+    assert "exit 1" in block
