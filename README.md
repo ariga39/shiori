@@ -70,7 +70,12 @@ shiyi serve
 `--dry-run` parses and chunks the selected source without opening PostgreSQL
 or calling the embedding provider. Normal commands fail with a structured
 error if the source, database, provider, key, model, or dimension is absent.
-The MCP server exposes only the read-only `search` tool.
+The MCP server exposes only the read-only `search` tool. Its `limit` is capped
+at 20 and its `offset` is bounded; each page reports `has_more` and a stable
+`next_offset`. Results carry explicit timestamp/session/source provenance plus
+the embedding model and dimension used for compatibility filtering. Invalid
+input, provider failures, dimension/model mismatches, and database failures
+return stable error codes without backend text or credentials.
 
 The original script entry points remain as compatibility wrappers and accept
 the same `--config` and `--legacy-openclaw` switches. New deployments should
@@ -121,7 +126,12 @@ uv run pytest -q
 
 Hybrid retrieval combines semantic vector similarity, PostgreSQL full-text
 ranking, and exact substring matching for short queries. Results then apply
-temporal decay and MMR-style similarity suppression.
+temporal decay and MMR-style similarity suppression. The query service caps
+page size, offset, candidate rows, and query text length; it uses deterministic
+tie-breaks and a one-row look-ahead for truthful pagination. Rows from a
+different embedding model or vector dimension are excluded rather than
+silently mixed into a result page. The MCP surface performs no ingest or
+other data-writing operation.
 
 ## License
 

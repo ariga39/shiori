@@ -89,7 +89,8 @@ def test_limit_is_clamped_to_max(server, monkeypatch):
 
     monkeypatch.setattr(query, "search", fake_search)
     _call(server, "search", {"query": "anything", "limit": 100})
-    assert captured["limit"] == 20
+    # The bounded page asks for one look-ahead row so has_more is truthful.
+    assert captured["limit"] == 21
 
 
 def test_default_limit_is_5(server, monkeypatch):
@@ -101,7 +102,7 @@ def test_default_limit_is_5(server, monkeypatch):
 
     monkeypatch.setattr(query, "search", fake_search)
     _call(server, "search", {"query": "anything"})
-    assert captured["limit"] == 5
+    assert captured["limit"] == 6
 
 
 def test_empty_query_returns_error(server):
