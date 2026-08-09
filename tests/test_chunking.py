@@ -79,9 +79,9 @@ def test_tool_messages_filtered_out_before_chunking():
 # ── ingest_discord.build_chunks ──────────────────────────────────────────────
 
 
-def _dmsg(i, content, ts="2026-08-03T00:00:00+00:00", msg_id="id%d" % 0):
+def _dmsg(i, content, ts="2026-08-03T00:00:00+00:00", msg_id="id0"):
     return {
-        "id": msg_id or "id%d" % i,
+        "id": msg_id or f"id{i}",
         "type": 0,
         "timestamp": ts,
         "author": {"global_name": "alice", "username": "alice"},

@@ -1,8 +1,7 @@
-import pytest
-
-import ingest
 
 from helpers import count_chunks, make_chunk
+
+import ingest
 
 
 def test_missing_embedding_preserves_existing(db, emb):

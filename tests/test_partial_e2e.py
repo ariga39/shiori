@@ -1,25 +1,14 @@
 import os
-import uuid
 
-import psycopg2
-import pytest
+from conftest import VALID_EMB, _connect
+from helpers import count_chunks, make_chunk, make_discord_chunk
 
 import ingest
 import ingest_discord
 
-from conftest import VALID_EMB
-from helpers import count_chunks, make_chunk, make_discord_chunk
-
 
 def _open():
-    creds = ingest.load_credentials()
-    return psycopg2.connect(
-        host=creds["host"],
-        port=int(creds["port"]),
-        dbname=creds["dbname"],
-        user=creds["user"],
-        password=creds["password"],
-    )
+    return _connect()
 
 
 def _cleanup(conn, file_path, sid):

@@ -1,7 +1,7 @@
 import time
 
-import requests
 import pytest
+import requests
 
 import ingest
 import ingest_discord
@@ -19,7 +19,7 @@ class FakeResp:
 
     def raise_for_status(self):
         if self.status_code >= 400 and self.status_code != 429:
-            raise requests.HTTPError("HTTP %d" % self.status_code)
+            raise requests.HTTPError(f"HTTP {self.status_code}")
 
     def json(self):
         return self._data

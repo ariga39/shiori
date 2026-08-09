@@ -1,6 +1,11 @@
 # Python
 __pycache__/
 *.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
 venv/
 venv.bak*/
 .env
@@ -14,6 +19,7 @@ venv.bak*/
 *.sqlite
 *.sqlite3
 .deleted.*
+.data/
 
 # 凭据（防止误提交）
 *.key

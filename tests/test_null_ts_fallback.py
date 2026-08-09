@@ -1,12 +1,9 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import pytest
+from helpers import make_chunk
 
 import ingest
 import query
-
-from conftest import VALID_EMB
-from helpers import make_chunk
 
 
 def _ts(chunk, conn, sid, content):
@@ -31,7 +28,7 @@ def _null_ts_chunk(i, sid, content):
 # ── Store-level: file mtime written when ts parse fails ─────────────────────
 def test_null_ts_chunk_gets_file_mtime_fallback(db, emb):
     conn, sid = db
-    old = datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc)
+    old = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
     stored, failed = ingest.store_chunks(
         [_null_ts_chunk(0, sid, "nts one")], [emb], [], conn, fallback_ts=old,
     )
@@ -43,7 +40,7 @@ def test_null_ts_chunk_gets_file_mtime_fallback(db, emb):
 
 def test_reingest_null_ts_does_not_become_new(db, emb):
     conn, sid = db
-    old = datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc)
+    old = datetime(2026, 5, 1, 12, 0, 0, tzinfo=UTC)
     ingest.store_chunks([_null_ts_chunk(0, sid, "rst one")], [emb], [], conn, fallback_ts=old)
     ts_start, _ = _ts(None, conn, sid, "rst one")
     assert ts_start == old
@@ -79,7 +76,7 @@ FAR_EMB = [0.5] + [0.8660254] + [0.0] * 1022
 def test_null_ts_decay_discriminates_by_stored_mtime(db, monkeypatch):
     conn, prefix = db
     monkeypatch.setattr(query, "embed_query", lambda q: QUERY_EMB)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Two NULL-ts-equivalent chunks (no parseable message time) stored with
     # different file mtimes. Decay must be driven by the stored mtime, so the

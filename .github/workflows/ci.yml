@@ -1,0 +1,165 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Synthetic service credentials only; no repository or user credential
+      # is used by CI.  The test DSN itself omits the password and psycopg2
+      # receives it through this job-local environment variable.
+      PGPASSWORD: shiyi-ci-only
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: shiyi_ci
+          POSTGRES_PASSWORD: shiyi-ci-only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shiyi_ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.3'
+
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev
+
+      - name: Check direct dependency licenses
+        run: uv run python tools/check_licenses.py
+
+      - name: Compile project Python surface
+        run: >-
+          uv run python -m compileall -q shiyi ingest.py ingest_hermes.py
+          ingest_discord.py query.py mcp_server.py tests tools
+
+      - name: Lint project
+        run: uv run ruff check .
+
+      - name: Type-check installable package
+        run: uv run pyright
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+
+      - name: Enable pgvector preload and verify service parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+            --set ON_ERROR_STOP=1 \
+            --command "ALTER SYSTEM SET shared_preload_libraries = 'vector';"
+
+          mapfile -t containers < <(
+            docker ps --filter 'ancestor=pgvector/pgvector:pg17' --format '{{.ID}}'
+          )
+          if (( ${#containers[@]} != 1 )); then
+            echo "expected exactly one pgvector service container" >&2
+            exit 1
+          fi
+          docker restart "${containers[0]}" >/dev/null
+
+          ready=false
+          for _ in {1..60}; do
+            if pg_isready --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${ready}" != true ]]; then
+            echo "pgvector service did not become ready after restart" >&2
+            exit 1
+          fi
+
+          loaded="$(
+            psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+              --set ON_ERROR_STOP=1 --tuples-only --no-align \
+              --command 'SHOW shared_preload_libraries;'
+          )"
+          if ! grep -Eq '(^|[,[:space:]])vector([,[:space:]]|$)' <<<"${loaded}"; then
+            echo "pgvector preload verification failed" >&2
+            exit 1
+          fi
+
+      - name: Prepare isolated database
+        shell: bash
+        run: |
+          set -euo pipefail
+          db="shiyi_test_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${RANDOM}"
+          marker="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
+          if [[ ! "${marker}" =~ ^ci-[0-9]+-[0-9]+-[0-9]+$ ]]; then
+            echo "refusing malformed test database marker" >&2
+            exit 1
+          fi
+          psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+            --set ON_ERROR_STOP=1 --command "CREATE DATABASE \"${db}\";"
+          dsn="postgresql://shiyi_ci@127.0.0.1:5432/${db}"
+          psql "${dsn}" --set ON_ERROR_STOP=1 --file schema.sql
+          psql "${dsn}" --set ON_ERROR_STOP=1 \
+            --command "CREATE TABLE shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES ('${marker}');"
+          {
+            echo "SHIYI_TEST_DATABASE_DSN=${dsn}"
+            echo "SHIYI_TEST_DATABASE_NAME=${db}"
+            echo "SHIYI_TEST_DATABASE_MARKER=${marker}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Clean wheel install and CLI smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "${smoke_dir}"' EXIT
+          uv venv --python 3.12 "${smoke_dir}/venv"
+          uv pip install --python "${smoke_dir}/venv/bin/python" dist/*.whl
+          cli="${smoke_dir}/venv/bin/shiyi"
+          err_dir="${smoke_dir}/errors"
+          mkdir -p "${err_dir}"
+          smoke_cli() {
+            local label="$1"
+            "${cli}" --help >/dev/null
+            "${smoke_dir}/venv/bin/python" - <<'PY'
+          import asyncio
+
+          from mcp_server import build_server
+
+          tools = asyncio.run(build_server().list_tools())
+          assert [tool.name for tool in tools] == ["search"]
+          PY
+            if "${cli}" ingest --source sessions --dry-run >"${err_dir}/${label}-ingest" 2>&1; then exit 1; fi
+            grep -q '^error\[' "${err_dir}/${label}-ingest"
+            if "${cli}" query smoke >"${err_dir}/${label}-query" 2>&1; then exit 1; fi
+            grep -q '^error\[' "${err_dir}/${label}-query"
+            if "${cli}" serve >"${err_dir}/${label}-serve" 2>&1; then exit 1; fi
+            grep -q '^error\[' "${err_dir}/${label}-serve"
+          }
+          smoke_cli wheel
+          uv pip install --reinstall --python "${smoke_dir}/venv/bin/python" dist/*.tar.gz
+          smoke_cli sdist
+
+      - name: Drop isolated database
+        if: always()
+        shell: bash
+        run: tools/drop_isolated_db.sh

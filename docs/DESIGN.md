@@ -10,6 +10,11 @@
 
 ## 1. 项目概述与目标
 
+> 当前安装与运行合同以根目录 `README.md`、`pyproject.toml`、
+> `shiyi.config.Settings` 和 `docs/CONFIGURATION.md` 为准。本文保留早期
+> 运行时设计中的路径/部署记录；任何 OpenClaw/Hermes 路径在当前代码中
+> 只通过显式 `--legacy-openclaw` 迁移开关启用，不是默认配置。
+
 `session-memory-pg` 是一个把「对话会话历史」加工成语义可检索记忆的摄取与查询管线。它解决的核心问题是：OpenClaw / Discord 的会话记录是海量、非结构化、不可语义检索的原始文本，无法快速回答「我之前什么时候讨论过 X？」这类问题。
 
 项目目标：

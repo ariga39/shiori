@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=75,<80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shiyi"
+version = "0.1.0"
+description = "Searchable long-term memory for AI agents"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "mcp>=1.9,<2",
+  "numpy>=2.0,<3",
+  "psycopg2-binary>=2.9,<3",
+  "requests>=2.32,<3",
+  "tiktoken>=0.9,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyright>=1.1,<2",
+  "pytest>=8.3,<9",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+shiyi = "shiyi.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["shiyi*"]
+
+[tool.setuptools]
+py-modules = ["ingest", "ingest_discord", "ingest_hermes", "query", "mcp_server"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [".venv", "dist", "build"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pyright]
+include = [
+  "shiyi",
+  "ingest.py",
+  "ingest_discord.py",
+  "ingest_hermes.py",
+  "query.py",
+  "mcp_server.py",
+]
+typeCheckingMode = "basic"
+reportMissingImports = false
