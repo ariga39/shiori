@@ -112,10 +112,10 @@ def test_empty_query_returns_error(server):
 
 def test_search_failure_mapped_to_readable_error(server, monkeypatch):
     def boom(q, limit=5):
-        raise RuntimeError("embed failed")
+        raise RuntimeError("postgresql://user:synthetic-secret@example.test/db")
 
     monkeypatch.setattr(query, "search", boom)
     result = _call(server, "search", {"query": "anything"})
     data = _parse(result)
-    assert "error" in data
-    assert "embed failed" in data["error"]
+    assert data["error"] == {"code": "search_failed", "type": "RuntimeError"}
+    assert "synthetic-secret" not in json.dumps(data)

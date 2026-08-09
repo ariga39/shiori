@@ -600,7 +600,8 @@ def main(argv=None):
             conn = get_db()
             cur = conn.cursor()
             cur.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_ID,))
-            locked = cur.fetchone()[0]
+            lock_row = cur.fetchone()
+            locked = bool(lock_row and lock_row[0])
             cur.close()
             if not locked:
                 log.warning("Another instance running, exiting.")
@@ -713,7 +714,8 @@ def main(argv=None):
                         try:
                             c = conn.cursor()
                             c.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_ID,))
-                            locked = c.fetchone()[0]
+                            lock_row = c.fetchone()
+                            locked = bool(lock_row and lock_row[0])
                             c.close()
                         except Exception as relock_err:
                             log.error("Re-acquire lock failed: %s, aborting", relock_err)

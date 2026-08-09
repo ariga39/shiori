@@ -483,7 +483,8 @@ def main(argv=None):
             conn = get_db()
             cur = conn.cursor()
             cur.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_ID,))
-            locked = cur.fetchone()[0]
+            lock_row = cur.fetchone()
+            locked = bool(lock_row and lock_row[0])
             cur.close()
             if not locked:
                 log.warning("Another instance running, exiting.")

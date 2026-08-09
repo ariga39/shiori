@@ -223,7 +223,8 @@ def main(argv=None):
             conn = ingest.get_db()
             cur = conn.cursor()
             cur.execute("SELECT pg_try_advisory_lock(%s)", (HERMES_ADVISORY_LOCK_ID,))
-            locked = cur.fetchone()[0]
+            lock_row = cur.fetchone()
+            locked = bool(lock_row and lock_row[0])
             cur.close()
             if not locked:
                 log.warning("Another instance running, exiting.")
@@ -288,6 +289,7 @@ def main(argv=None):
                 if not messages:
                     log.info("%s: no user/assistant messages", s["session_id"])
                     if not args.dry_run:
+                        assert conn is not None
                         # A rewound session may have zero remaining active rows;
                         # any previously-ingested chunks must be purged so the
                         # undone content stops being searchable in PG.
@@ -309,6 +311,7 @@ def main(argv=None):
                 if not chunks:
                     log.info("%s: %d msgs → 0 chunks (all too short)", s["session_id"], len(messages))
                     if not args.dry_run:
+                        assert conn is not None
                         # Same purge: if nothing chunkable remains, PG must not
                         # keep serving the session's old chunks.
                         cur = conn.cursor()

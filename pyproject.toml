@@ -49,6 +49,13 @@ select = ["E", "F", "I", "UP"]
 ignore = ["E501"]
 
 [tool.pyright]
-include = ["shiyi"]
+include = [
+  "shiyi",
+  "ingest.py",
+  "ingest_discord.py",
+  "ingest_hermes.py",
+  "query.py",
+  "mcp_server.py",
+]
 typeCheckingMode = "basic"
 reportMissingImports = false

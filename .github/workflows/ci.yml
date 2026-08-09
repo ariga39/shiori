@@ -118,7 +118,4 @@ jobs:
       - name: Drop isolated database
         if: always()
         shell: bash
-        run: |
-          if [[ -n "${SHIYI_TEST_DATABASE_NAME:-}" ]]; then
-            dropdb --if-exists --host 127.0.0.1 --port 5432 --username shiyi_ci "${SHIYI_TEST_DATABASE_NAME}"
-          fi
+        run: tools/drop_isolated_db.sh
