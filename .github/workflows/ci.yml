@@ -64,12 +64,16 @@ jobs:
           set -euo pipefail
           db="shiyi_test_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${RANDOM}"
           marker="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
+          if [[ ! "${marker}" =~ ^ci-[0-9]+-[0-9]+-[0-9]+$ ]]; then
+            echo "refusing malformed test database marker" >&2
+            exit 1
+          fi
           psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
             --set ON_ERROR_STOP=1 --command "CREATE DATABASE \"${db}\";"
           dsn="postgresql://shiyi_ci@127.0.0.1:5432/${db}"
           psql "${dsn}" --set ON_ERROR_STOP=1 --file schema.sql
-          psql "${dsn}" --set ON_ERROR_STOP=1 --variable marker="${marker}" \
-            --command "CREATE TABLE shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES (:'marker');"
+          psql "${dsn}" --set ON_ERROR_STOP=1 \
+            --command "CREATE TABLE shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES ('${marker}');"
           {
             echo "SHIYI_TEST_DATABASE_DSN=${dsn}"
             echo "SHIYI_TEST_DATABASE_NAME=${db}"

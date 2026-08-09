@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__).parents[1] / "tools" / "drop_isolated_db.sh"
+WORKFLOW = Path(__file__).parents[1] / ".github" / "workflows" / "ci.yml"
 
 
 def _fake_bin(tmp_path: Path) -> Path:
@@ -33,7 +34,14 @@ printf 'dropped' > "${DROP_SENTINEL}"
     return bin_dir
 
 
-def _run(tmp_path: Path, *, database: str, current: str, marker: str):
+def _run(
+    tmp_path: Path,
+    *,
+    database: str,
+    current: str,
+    marker: str,
+    expected_marker: str = "ci-123-1-456",
+):
     bin_dir = _fake_bin(tmp_path)
     sentinel = tmp_path / "dropped"
     env = {
@@ -44,7 +52,7 @@ def _run(tmp_path: Path, *, database: str, current: str, marker: str):
         "DROP_SENTINEL": str(sentinel),
         "SHIYI_TEST_DATABASE_NAME": database,
         "SHIYI_TEST_DATABASE_DSN": "postgresql://synthetic",
-        "SHIYI_TEST_DATABASE_MARKER": "marker-123",
+        "SHIYI_TEST_DATABASE_MARKER": expected_marker,
         "GITHUB_RUN_ID": "123",
         "GITHUB_RUN_ATTEMPT": "1",
     }
@@ -64,7 +72,7 @@ def test_teardown_drops_only_matching_database_and_marker(tmp_path):
         tmp_path,
         database=database,
         current=database,
-        marker="marker-123",
+        marker="ci-123-1-456",
     )
 
     assert result.returncode == 0, result.stderr
@@ -77,7 +85,7 @@ def test_teardown_refuses_marker_mismatch(tmp_path):
         tmp_path,
         database=database,
         current=database,
-        marker="wrong-marker",
+        marker="ci-123-1-999",
     )
 
     assert result.returncode != 0
@@ -90,7 +98,7 @@ def test_teardown_refuses_current_database_mismatch(tmp_path):
         tmp_path,
         database=database,
         current="another_database",
-        marker="marker-123",
+        marker="ci-123-1-456",
     )
 
     assert result.returncode != 0
@@ -103,8 +111,33 @@ def test_teardown_refuses_database_outside_job_namespace(tmp_path):
         tmp_path,
         database=database,
         current=database,
-        marker="marker-123",
+        marker="ci-123-1-456",
     )
 
     assert result.returncode != 0
     assert not sentinel.exists()
+
+
+def test_teardown_refuses_malformed_marker(tmp_path):
+    database = "shiyi_test_123_1_456"
+    result, sentinel = _run(
+        tmp_path,
+        database=database,
+        current=database,
+        marker="not-a-ci-marker",
+        expected_marker="not-a-ci-marker",
+    )
+
+    assert result.returncode != 0
+    assert not sentinel.exists()
+
+
+def test_ci_marker_sql_uses_controlled_literal_not_command_variable_expansion():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    teardown = SCRIPT.read_text(encoding="utf-8")
+
+    assert ":'marker'" not in workflow
+    assert ":'marker'" not in teardown
+    assert "VALUES ('${marker}')" in workflow
+    assert "^ci-[0-9]+-[0-9]+-[0-9]+$" in workflow
+    assert "^ci-[0-9]+-[0-9]+-[0-9]+$" in teardown
