@@ -91,8 +91,17 @@ data directory can be changed with `SHIYI_PG_PORT` and
 
 ```bash
 SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d
-psql -h 127.0.0.1 -p 5433 -U <user> -d <db> -f schema.sql
+shiyi db migrate        # apply forward-only migrations (recommended)
+psql -h 127.0.0.1 -p 5433 -U <user> -d <db> -f schema.sql   # legacy bootstrap
 ```
+
+Schema is managed by **forward-only migrations** (`shiyi/schema_migrations/`,
+recorded in `shiyi_schema_migrations`). Run `shiyi db migrate` on a fresh or
+existing database; it applies only unapplied migrations, each in its own
+transaction. `shiyi db health` reports repository version/table/extension
+status, and `shiyi db backup <path>` / `shiyi db restore <path>` provide the
+transactional backup/restore contract. `schema.sql` remains the legacy
+one-shot bootstrap reference and does not repair drift on existing databases.
 
 The credential file is explicit `key=value` data with `dbname`, `user`, and
 `password` entries. `deploy/run.sh` never prints its contents and does not

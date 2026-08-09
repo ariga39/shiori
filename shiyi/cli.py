@@ -40,6 +40,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="run the read-only MCP server")
     _config_args(serve, suppress_default=True)
+
+    db = sub.add_parser("db", help="database schema/repository operations")
+    _config_args(db, suppress_default=True)
+    db_sub = db.add_subparsers(dest="db_command", required=True)
+    db_sub.add_parser("migrate", help="apply forward-only migrations")
+    db_sub.add_parser("health", help="repository health/version check")
+    backup = db_sub.add_parser("backup", help="export repository to a JSON backup")
+    backup.add_argument("dest", help="backup JSON path")
+    restore = db_sub.add_parser("restore", help="restore repository from a JSON backup")
+    restore.add_argument("src", help="backup JSON path")
     return parser
 
 
@@ -119,6 +129,50 @@ def _run_serve(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _run_db(args: argparse.Namespace, settings: Settings) -> int:
+    # DB schema/repository operations need the database, never embeddings.
+    settings.require_database()
+    import json as _json
+    from pathlib import Path
+
+    import psycopg2
+
+    from .config import credentials_from_settings
+    from .migrations import MigrationError, migrate, schema_version
+    from .repository import backup_to_json, repository_health, restore_from_json
+
+    creds = credentials_from_settings(settings)
+    dsn = creds["dsn"]
+    conn = psycopg2.connect(dsn)
+    try:
+        if args.db_command == "health":
+            health = repository_health(conn)
+            print(_json.dumps(health, sort_keys=True, default=str))
+            return 0 if health["ok"] else 2
+        if args.db_command == "migrate":
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            applied = migrate(conn, migrations_dir=migrations_dir)
+            print(_json.dumps({"applied": applied, "version": schema_version(conn)}, sort_keys=True))
+            return 0
+        if args.db_command == "backup":
+            result = backup_to_json(conn, Path(args.dest))
+            print(_json.dumps(result, sort_keys=True))
+            return 0
+        if args.db_command == "restore":
+            result = restore_from_json(conn, Path(args.src))
+            print(_json.dumps(result, sort_keys=True))
+            return 0
+        print("error[unknown_db_command]", file=sys.stderr)
+        return 2
+    except MigrationError as exc:
+        print(f"error[{exc.code}]: {exc.message}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -127,6 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_ingest(args, settings)
         if args.command == "query":
             return _run_query(args, settings)
+        if args.command == "db":
+            return _run_db(args, settings)
         return _run_serve(args, settings)
     except ConfigError as exc:
         print(f"error[{exc.code}]: {exc}", file=sys.stderr)
