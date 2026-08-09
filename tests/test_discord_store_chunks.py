@@ -1,6 +1,6 @@
-import ingest_discord
-
 from helpers import count_chunks, make_discord_chunk
+
+import ingest_discord
 
 
 def test_discord_missing_embedding_preserves_existing(db, emb):

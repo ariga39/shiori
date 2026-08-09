@@ -1,11 +1,11 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 import ingest
 
-MTIME = datetime(2026, 8, 3, 5, 0, 0, tzinfo=timezone.utc)
+MTIME = datetime(2026, 8, 3, 5, 0, 0, tzinfo=UTC)
 
 
 class FakeCursor:
@@ -66,7 +66,7 @@ def _make_file(tmp_path, name, size_bytes=100, mtime=None):
     if mtime is not None:
         os.utime(p, (mtime.timestamp(), mtime.timestamp()))
     st = os.stat(p)
-    return str(p), datetime.fromtimestamp(st.st_mtime, tz=timezone.utc), st.st_size
+    return str(p), datetime.fromtimestamp(st.st_mtime, tz=UTC), st.st_size
 
 
 def test_main_skips_file_when_mtime_and_size_unchanged(no_db, tmp_path, clean_argv):

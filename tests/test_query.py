@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import psycopg2
 import pytest
@@ -47,8 +47,8 @@ def mock_embed(monkeypatch):
 def test_search_returns_vector_matched_content(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-vec"
-    _insert(conn, sid, "shiyi_test_alpha primary", QUERY_EMB, datetime.now(timezone.utc))
-    _insert(conn, sid, "shiyi_test_beta secondary", FAR_EMB, datetime.now(timezone.utc))
+    _insert(conn, sid, "shiyi_test_alpha primary", QUERY_EMB, datetime.now(UTC))
+    _insert(conn, sid, "shiyi_test_beta secondary", FAR_EMB, datetime.now(UTC))
     res = query.search("shiyi_test_alpha", limit=20)
     mine = [r for r in res if r[3] == sid]
     assert mine, "expected test chunk in results"
@@ -58,7 +58,7 @@ def test_search_returns_vector_matched_content(db, mock_embed):
 def test_temporal_decay_ranks_recent_higher(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-decay"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = now - timedelta(days=120)
     # Old chunk has the HIGHEST raw vector score (QUERY_EMB, cos=1.0) but is very
     # old; recent chunk has a lower raw vector score (FAR_EMB, cos=0.5 to the
@@ -76,7 +76,7 @@ def test_temporal_decay_ranks_recent_higher(db, mock_embed):
 def test_null_ts_uses_created_at_for_decay(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-nullts"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     old = now - timedelta(days=60)
     # Recent chunk with a real ts (FAR_EMB, cos=0.5) → score 0.5.
     _insert(conn, sid, "shiyi_test_recent_x", FAR_EMB, now)
@@ -94,7 +94,7 @@ def test_null_ts_uses_created_at_for_decay(db, mock_embed):
 def test_mmr_dedups_near_duplicate_embeddings(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-mmr"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _insert(conn, sid, "shiyi_test_dup_a", QUERY_EMB, now)
     _insert(conn, sid, "shiyi_test_dup_b", QUERY_EMB, now)
     res = query.search("zzqx no-bm25-match 7", limit=20)
@@ -105,7 +105,7 @@ def test_mmr_dedups_near_duplicate_embeddings(db, mock_embed):
 def test_tsvector_bm25_match_ranks_first(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-bm25"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Both chunks embed far from the query vector, so pure vector search would
     # rank neither on top. Only the chunk whose text contains the query term
     # gets a BM25/trigram boost.
@@ -172,7 +172,7 @@ class _FailConn:
 def test_search_survives_set_failure(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-setfail"
-    _insert(conn, sid, "shiyi_test_setfail target", QUERY_EMB, datetime.now(timezone.utc))
+    _insert(conn, sid, "shiyi_test_setfail target", QUERY_EMB, datetime.now(UTC))
     monkeypatch.setattr(query, "get_db",
                         lambda: _FailConn(conn, ["SET hnsw.ef_search"]))
     res = query.search("shiyi_test_setfail", limit=20)
@@ -184,7 +184,7 @@ def test_search_survives_set_failure(db, mock_embed, monkeypatch):
 def test_bm25_fallback_survives_tsvector_failure(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-tsvfail"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Matched chunk is FAR from the query vector (cos 0.5); the other is the
     # closest possible (cos 1.0). Without a working keyword fallback the matched
     # chunk ranks below the other; a working trigram fallback flips it on top.
@@ -216,7 +216,7 @@ def _insert_double_null(conn, sid, content, emb):
 def test_double_null_uses_null_ts_prior(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-dnull"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Both chunks match the nonsense keyword "zzqxmarker" via tsvector (so both
     # get a solid BM25 RRF boost into the top-N regardless of the ~20k-row DB),
     # and both are the nearest vector matches. The recent chunk (FAR_EMB) decays
@@ -243,7 +243,7 @@ def test_double_null_uses_null_ts_prior(db, mock_embed):
 def test_ef_search_clamped_to_1000_for_large_limit(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-efclamp"
-    _insert(conn, sid, "shiyi_test_efclamp target", QUERY_EMB, datetime.now(timezone.utc))
+    _insert(conn, sid, "shiyi_test_efclamp target", QUERY_EMB, datetime.now(UTC))
     # Reuse _FailConn with no failing substrings: it forwards to the real DB but
     # its close() is a no-op, so the fixture still owns `conn` for inspection.
     monkeypatch.setattr(query, "get_db", lambda: _FailConn(conn, []))
@@ -260,7 +260,7 @@ def test_ef_search_clamped_to_1000_for_large_limit(db, mock_embed, monkeypatch):
 def test_ef_search_equals_pool_for_small_limit(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-efsmall"
-    _insert(conn, sid, "shiyi_test_efsmall target", QUERY_EMB, datetime.now(timezone.utc))
+    _insert(conn, sid, "shiyi_test_efsmall target", QUERY_EMB, datetime.now(UTC))
     monkeypatch.setattr(query, "get_db", lambda: _FailConn(conn, []))
     # limit=45 -> pool=225 (>= 200 floor, < 1000 cap) -> ef_search stays = pool.
     res = query.search("shiyi_test_efsmall", limit=45)
@@ -315,7 +315,7 @@ def test_short_name_exact_substring_recalled(db, mock_embed):
     when its vector/BM25 signals are weak (mocked to FAR/different)."""
     conn, prefix = db
     sid = prefix + "-shortname"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Content containing the entity name, but vector-distant from the query emb.
     _insert(conn, sid, "日和拿到权限后开了 HF_XET 第三次尝试,跑得很顺", FAR_EMB, now)
     # A decoy that is vector-close but does NOT contain the name.
@@ -331,7 +331,7 @@ def test_short_name_escapes_like_wildcards(db, mock_embed):
     """ILIKE wildcards in the query must be escaped, not treated as patterns."""
     conn, prefix = db
     sid = prefix + "-escape"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _insert(conn, sid, "进度 100%_done 记录", QUERY_EMB, now)
     # '%' as a query should only match literal percent, not act as wildcard.
     res = query.search("100%", limit=10)

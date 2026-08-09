@@ -1,11 +1,11 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-import query
 import mcp_server
+import query
 
 QUERY_EMB = [1.0] + [0.0] * 1023
 
@@ -67,7 +67,7 @@ def test_tool_list_contains_search(server):
 def test_search_returns_structured_dicts(db, server, monkeypatch):
     conn, prefix = db
     sid = prefix + "-mcp"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _insert(conn, sid, "shiyi_test_mcp_target", QUERY_EMB, now)
     monkeypatch.setattr(query, "embed_query", lambda q: QUERY_EMB)
     monkeypatch.setattr(query, "get_db", lambda: _NoCloseConn(conn))
@@ -112,10 +112,10 @@ def test_empty_query_returns_error(server):
 
 def test_search_failure_mapped_to_readable_error(server, monkeypatch):
     def boom(q, limit=5):
-        raise RuntimeError("embed failed")
+        raise RuntimeError("postgresql://user:synthetic-secret@example.test/db")
 
     monkeypatch.setattr(query, "search", boom)
     result = _call(server, "search", {"query": "anything"})
     data = _parse(result)
-    assert "error" in data
-    assert "embed failed" in data["error"]
+    assert data["error"] == {"code": "search_failed", "type": "RuntimeError"}
+    assert "synthetic-secret" not in json.dumps(data)

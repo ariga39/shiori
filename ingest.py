@@ -10,24 +10,33 @@ Session Memory Ingestion Pipeline (v2 – Voyage-4-large)
 """
 
 import argparse
-import json
-import os
-import time
 import glob
+import json
 import logging
-from datetime import datetime, timezone
+import os
+import sys
+import time
+from datetime import UTC, datetime
 
 import psycopg2
 import psycopg2.sql
 import requests
 import tiktoken
 
+from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
+
 # ── Config ───────────────────────────────────────────────────────────────────
-SESSIONS_DIR = os.path.expanduser("~/.openclaw/agents/main/sessions")
+# These compatibility constants are intentionally not data-source defaults.
+# The installable CLI configures them from SHIYI_* before production work;
+# direct legacy imports may still monkeypatch them in existing tests.
+SESSIONS_DIR = None
+PG_CRED_PATH = None
+DATABASE_DSN = None
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
 VOYAGE_MODEL = "voyage-4-large"
-VOYAGE_KEY_PATH = os.path.expanduser("~/.openclaw/credentials/voyage-api-key.txt")
+VOYAGE_KEY_PATH = None
+VOYAGE_API_KEY = None
 EMBED_DIM = 1024
 
 CHUNK_TOKENS = 400
@@ -44,34 +53,111 @@ _enc = tiktoken.get_encoding("cl100k_base")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("/tmp/session-memory-ingest.log"),
-        logging.StreamHandler(),
-    ],
+    handlers=[logging.StreamHandler(sys.stderr)],
 )
 log = logging.getLogger(__name__)
 
 
+def apply_settings(settings: Settings) -> None:
+    """Apply typed settings to the legacy module surface.
+
+    Keeping these names lets existing integrations import the old scripts,
+    while the CLI and all real commands obtain values from one typed object.
+    ``None`` source values do not overwrite compatibility monkeypatches used by
+    the old unit tests; real commands fail closed when they try to use them.
+    """
+    global SESSIONS_DIR, PG_CRED_PATH, DATABASE_DSN
+    global VOYAGE_API_URL, VOYAGE_KEY_PATH, VOYAGE_API_KEY, VOYAGE_MODEL, EMBED_DIM
+    global CHUNK_TOKENS, CHUNK_OVERLAP, VOYAGE_BATCH_SIZE, VOYAGE_RPS_LIMIT
+    global EMBED_TIMEOUT, MAX_RETRIES, ADVISORY_LOCK_ID
+
+    if settings.sessions_dir is not None:
+        SESSIONS_DIR = str(settings.sessions_dir)
+    if settings.pg_cred_file is not None:
+        PG_CRED_PATH = str(settings.pg_cred_file)
+    if settings.database_dsn is not None:
+        DATABASE_DSN = settings.database_dsn
+    if settings.voyage_api_url is not None:
+        VOYAGE_API_URL = settings.voyage_api_url
+    if settings.voyage_key_file is not None:
+        VOYAGE_KEY_PATH = str(settings.voyage_key_file)
+    if settings.voyage_api_key is not None:
+        VOYAGE_API_KEY = settings.voyage_api_key
+    if settings.voyage_model is not None:
+        VOYAGE_MODEL = settings.voyage_model
+    if settings.embed_dim is not None:
+        EMBED_DIM = settings.embed_dim
+    CHUNK_TOKENS = settings.chunk_tokens
+    CHUNK_OVERLAP = settings.chunk_overlap
+    VOYAGE_BATCH_SIZE = settings.voyage_batch_size
+    VOYAGE_RPS_LIMIT = settings.voyage_rps_limit
+    EMBED_TIMEOUT = settings.embed_timeout
+    MAX_RETRIES = settings.max_retries
+    ADVISORY_LOCK_ID = settings.sessions_lock_id
+
+
+def configure_logging(settings: Settings) -> None:
+    """Add an explicitly configured log file without ever choosing one."""
+    if settings.log_file is None:
+        return
+    settings.log_file.parent.mkdir(parents=True, exist_ok=True)
+    if not any(isinstance(handler, logging.FileHandler) and handler.baseFilename == str(settings.log_file) for handler in log.handlers):
+        handler = logging.FileHandler(settings.log_file, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        log.addHandler(handler)
+
+
 # ── Credentials ──────────────────────────────────────────────────────────────
 def _read_voyage_key():
-    with open(VOYAGE_KEY_PATH) as f:
-        return f.read().strip()
+    if VOYAGE_API_KEY:
+        return VOYAGE_API_KEY
+    if VOYAGE_KEY_PATH:
+        try:
+            with open(VOYAGE_KEY_PATH, encoding="utf-8") as f:
+                value = f.read().strip()
+        except OSError as exc:
+            raise ConfigError("Voyage key file cannot be read", code="key_file_unreadable") from exc
+        if not value:
+            raise ConfigError("Voyage key file is empty", code="key_file_empty")
+        return value
+    settings = load_config()
+    return settings.read_voyage_key()
 
 
-def load_credentials():
-    cred_path = os.path.expanduser("~/.openclaw/credentials/session-memory-pg.txt")
-    creds = {}
-    with open(cred_path) as fh:
-        for raw_line in fh:
-            raw_line = raw_line.strip()
-            if "=" in raw_line:
-                k, v = raw_line.split("=", 1)
-                creds[k] = v
-    return creds
+def load_credentials(path=None):
+    """Load explicitly configured key/value credentials.
+
+    The old implicit home-directory lookup was removed.  Callers may pass a
+    path explicitly, or set SHIYI_PG_CRED/SHIYI_DATABASE_DSN.
+    """
+    if path is not None:
+        values = {}
+        with open(path, encoding="utf-8") as fh:
+            for raw_line in fh:
+                raw_line = raw_line.strip()
+                if "=" in raw_line:
+                    k, v = raw_line.split("=", 1)
+                    values[k.strip()] = v.strip()
+        return values
+    if PG_CRED_PATH:
+        return load_credentials(PG_CRED_PATH)
+    settings = load_config()
+    return credentials_from_settings(settings)
 
 
 def get_db():
+    if DATABASE_DSN:
+        return psycopg2.connect(DATABASE_DSN)
     creds = load_credentials()
+    if "dsn" in creds:
+        return psycopg2.connect(creds["dsn"])
+    required = ("host", "port", "dbname", "user", "password")
+    missing = [key for key in required if key not in creds or not creds[key]]
+    if missing:
+        raise ConfigError(
+            "database credentials missing: " + ", ".join(missing),
+            code="invalid_database_config",
+        )
     return psycopg2.connect(
         host=creds["host"],
         port=int(creds["port"]),
@@ -96,7 +182,7 @@ def parse_session_file(filepath):
     """Return type=message entries from a session JSONL."""
     messages = []
     try:
-        with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+        with open(filepath, encoding="utf-8", errors="replace") as fh:
             for line_no, raw_line in enumerate(fh, 1):
                 raw_line = raw_line.strip()
                 if not raw_line:
@@ -147,7 +233,7 @@ def extract_text_from_message(obj):
     if not trimmed or len(trimmed) < 5:
         return None
 
-    return "[%s] %s" % (role, trimmed)
+    return f"[{role}] {trimmed}"
 
 
 # ── Token-based chunking ────────────────────────────────────────────────────
@@ -307,7 +393,7 @@ def parse_timestamp(ts):
     if isinstance(ts, (int, float)):
         if ts > 1e12:
             ts = ts / 1000
-        return datetime.fromtimestamp(ts, tz=timezone.utc)
+        return datetime.fromtimestamp(ts, tz=UTC)
     if isinstance(ts, str):
         for fmt in [
             "%Y-%m-%dT%H:%M:%S.%fZ",
@@ -366,7 +452,7 @@ def store_chunks(chunks, embeddings, failed_indices, conn, fallback_ts=None):
             ts_start = fallback_ts
             ts_end = ts_start
 
-        sp_name = psycopg2.sql.Identifier("sp_chunk_%d" % idx)
+        sp_name = psycopg2.sql.Identifier(f"sp_chunk_{idx}")
         try:
             cur.execute(psycopg2.sql.SQL("SAVEPOINT {}").format(sp_name))
             cur.execute("""
@@ -431,6 +517,11 @@ def mark_file_processed(conn, filepath, mtime, size, source_type, chunks_created
 
 
 def find_session_files():
+    if not SESSIONS_DIR:
+        raise ConfigError(
+            "sessions source is disabled; set SHIYI_SESSIONS_DIR",
+            code="source_not_configured",
+        )
     patterns = [
         os.path.join(SESSIONS_DIR, "*.jsonl"),
         os.path.join(SESSIONS_DIR, "*.jsonl.deleted.*"),
@@ -484,11 +575,21 @@ def derive_session_id(filepath):
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Session Memory Ingestion Pipeline (v2)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     parser.add_argument("--force", action="store_true", help="Reprocess all files")
-    args = parser.parse_args()
+    parser.add_argument("--config", help="JSON/TOML config file")
+    parser.add_argument(
+        "--legacy-openclaw",
+        action="store_true",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+    )
+    args = parser.parse_args(argv)
+
+    settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
+    apply_settings(settings)
+    configure_logging(settings)
 
     log.info("=== Session Memory Ingestion v2 (Voyage) ===%s", " [DRY-RUN]" if args.dry_run else "")
 
@@ -499,7 +600,8 @@ def main():
             conn = get_db()
             cur = conn.cursor()
             cur.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_ID,))
-            locked = cur.fetchone()[0]
+            lock_row = cur.fetchone()
+            locked = bool(lock_row and lock_row[0])
             cur.close()
             if not locked:
                 log.warning("Another instance running, exiting.")
@@ -513,7 +615,7 @@ def main():
         to_process = []
         for filepath in all_files:
             stat = os.stat(filepath)
-            mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
             size = stat.st_size
             prev = processed.get(filepath)
             if prev and prev["mtime"] == mtime and prev["size"] == size:
@@ -548,7 +650,7 @@ def main():
                 total_messages += len(messages)
 
                 first_lines = []
-                with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+                with open(filepath, encoding="utf-8", errors="replace") as fh:
                     for line_idx, line in enumerate(fh):
                         if line_idx >= 20:
                             break
@@ -612,7 +714,8 @@ def main():
                         try:
                             c = conn.cursor()
                             c.execute("SELECT pg_try_advisory_lock(%s)", (ADVISORY_LOCK_ID,))
-                            locked = c.fetchone()[0]
+                            lock_row = c.fetchone()
+                            locked = bool(lock_row and lock_row[0])
                             c.close()
                         except Exception as relock_err:
                             log.error("Re-acquire lock failed: %s, aborting", relock_err)

@@ -6,19 +6,21 @@ Includes temporal decay and MMR deduplication.
 Usage: python3 query.py "search query" [--limit N]
 """
 
-import sys
-import os
 import argparse
-import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
+import numpy as np
 import psycopg2
 import requests
-import numpy as np
+
+from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
 VOYAGE_MODEL = "voyage-4-large"
-VOYAGE_KEY_PATH = os.path.expanduser("~/.openclaw/credentials/voyage-api-key.txt")
+VOYAGE_KEY_PATH = None
+VOYAGE_API_KEY = None
+PG_CRED_PATH = None
+DATABASE_DSN = None
 
 # Temporal decay: score *= 2^(-days_old / HALF_LIFE_DAYS)
 HALF_LIFE_DAYS = 30
@@ -29,25 +31,63 @@ NULL_TS_PRIOR = 0.25
 MMR_SIM_THRESHOLD = 0.85
 
 
+def apply_settings(settings: Settings) -> None:
+    global VOYAGE_API_URL, VOYAGE_MODEL, VOYAGE_KEY_PATH, VOYAGE_API_KEY
+    global PG_CRED_PATH, DATABASE_DSN
+    if settings.voyage_api_url is not None:
+        VOYAGE_API_URL = settings.voyage_api_url
+    if settings.voyage_model is not None:
+        VOYAGE_MODEL = settings.voyage_model
+    if settings.voyage_key_file is not None:
+        VOYAGE_KEY_PATH = str(settings.voyage_key_file)
+    if settings.voyage_api_key is not None:
+        VOYAGE_API_KEY = settings.voyage_api_key
+    if settings.pg_cred_file is not None:
+        PG_CRED_PATH = str(settings.pg_cred_file)
+    if settings.database_dsn is not None:
+        DATABASE_DSN = settings.database_dsn
+
+
 def _read_voyage_key():
-    with open(VOYAGE_KEY_PATH) as f:
-        return f.read().strip()
+    if VOYAGE_API_KEY:
+        return VOYAGE_API_KEY
+    if VOYAGE_KEY_PATH:
+        try:
+            with open(VOYAGE_KEY_PATH, encoding="utf-8") as f:
+                value = f.read().strip()
+        except OSError as exc:
+            raise ConfigError("Voyage key file cannot be read", code="key_file_unreadable") from exc
+        if not value:
+            raise ConfigError("Voyage key file is empty", code="key_file_empty")
+        return value
+    return load_config().read_voyage_key()
 
 
-def load_credentials():
-    cred_path = os.path.expanduser("~/.openclaw/credentials/session-memory-pg.txt")
-    creds = {}
-    with open(cred_path) as fh:
-        for raw_line in fh:
-            raw_line = raw_line.strip()
-            if "=" in raw_line:
-                k, v = raw_line.split("=", 1)
-                creds[k] = v
-    return creds
+def load_credentials(path=None):
+    if path is not None:
+        creds = {}
+        with open(path, encoding="utf-8") as fh:
+            for raw_line in fh:
+                raw_line = raw_line.strip()
+                if "=" in raw_line:
+                    k, v = raw_line.split("=", 1)
+                    creds[k.strip()] = v.strip()
+        return creds
+    if PG_CRED_PATH:
+        return load_credentials(PG_CRED_PATH)
+    return credentials_from_settings(load_config())
 
 
 def get_db():
+    if DATABASE_DSN:
+        return psycopg2.connect(DATABASE_DSN)
     creds = load_credentials()
+    if "dsn" in creds:
+        return psycopg2.connect(creds["dsn"])
+    required = ("host", "port", "dbname", "user", "password")
+    missing = [key for key in required if key not in creds or not creds[key]]
+    if missing:
+        raise ConfigError("database credentials missing: " + ", ".join(missing), code="invalid_database_config")
     return psycopg2.connect(
         host=creds["host"],
         port=int(creds["port"]),
@@ -106,7 +146,7 @@ def search(query, limit=5):
     cur = conn.cursor()
 
     query_embedding = embed_query(query)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Candidate pool size
     pool = max(limit * 5, 30)
@@ -282,11 +322,22 @@ def search(query, limit=5):
     return selected
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Query session memory (v2)")
     parser.add_argument("query", help="Search query")
     parser.add_argument("--limit", "-n", type=int, default=5, help="Max results")
-    args = parser.parse_args()
+    parser.add_argument("--config", help="JSON/TOML config file")
+    parser.add_argument(
+        "--legacy-openclaw",
+        action="store_true",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+    )
+    args = parser.parse_args(argv)
+
+    settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
+    settings.require_database()
+    settings.require_embedding()
+    apply_settings(settings)
 
     results = search(args.query, args.limit)
 

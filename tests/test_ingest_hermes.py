@@ -22,9 +22,9 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-import ingest_hermes
 import ingest  # noqa: E402 — same package root as ingest_hermes
-from tests import helpers
+import ingest_hermes  # noqa: E402 — same package root as ingest_hermes
+from tests import helpers  # noqa: E402 — same package root as ingest_hermes
 
 
 @pytest.fixture
@@ -359,7 +359,7 @@ class TestChunkCompatibility:
         add_session(hermes_db, sid, message_count=4)
         for i in range(4):
             add_message(hermes_db, sid, "user" if i % 2 == 0 else "assistant",
-                        "line of text number %d " % i + "word " * 100)
+                        f"line of text number {i} " + "word " * 100)
 
         msgs = ingest_hermes.load_messages(hermes_db, sid)
         chunks = ingest.chunk_messages(msgs, sid, "discord")
