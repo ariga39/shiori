@@ -13,8 +13,11 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
+from mcp.server.fastmcp import FastMCP
+from mcp.types import CallToolResult
+
 import query
-from mcp.server import MCPServer
+from shiyi.config import Settings, load_config
 
 MAX_LIMIT = 20
 DEFAULT_LIMIT = 5
@@ -65,21 +68,25 @@ async def _search_tool(query: str, limit: int = DEFAULT_LIMIT) -> dict:
     return run_search(query, limit)
 
 
-def build_server() -> MCPServer:
-    server = MCPServer(
+class ShiyiMCPServer(FastMCP):
+    """FastMCP server with the pre-1.0 call result compatibility shape."""
+
+    async def call_tool(self, name: str, arguments: dict) -> CallToolResult:
+        result = await super().call_tool(name, arguments)
+        if isinstance(result, CallToolResult):
+            return result
+        return CallToolResult(content=list(result))
+
+
+def build_server() -> ShiyiMCPServer:
+    server = ShiyiMCPServer(
         name="session-memory",
-        title="session-memory-pg",
-        description="Read-only MCP server for session memory search.",
         instructions=(
             "Provides the `search` tool for retrieving relevant session memory "
             "chunks. Read-only: no write or ingest tools are exposed."
         ),
     )
-    server.add_tool(
-        _search_tool,
-        name="search",
-        description=TOOL_DESCRIPTION,
-    )
+    server.tool(name="search", description=TOOL_DESCRIPTION)(_search_tool)
     return server
 
 
@@ -88,5 +95,27 @@ async def _amain():
     await server.run_stdio_async()
 
 
+async def run_server(settings: Settings | None = None):
+    """Run the configured read-only server for the installed CLI."""
+    if settings is not None:
+        query.apply_settings(settings)
+    await _amain()
+
+
+def main(argv=None):
+    import argparse
+
+    parser = argparse.ArgumentParser(description="shiyi read-only MCP server")
+    parser.add_argument("--config", help="JSON/TOML config file")
+    parser.add_argument("--legacy-openclaw", action="store_true")
+    args = parser.parse_args(argv)
+    settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
+    settings.require_database()
+    settings.require_embedding()
+    query.apply_settings(settings)
+
+    asyncio.run(run_server(settings))
+
+
 if __name__ == "__main__":
-    asyncio.run(_amain())
+    main()

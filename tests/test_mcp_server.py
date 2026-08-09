@@ -1,11 +1,11 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-import query
 import mcp_server
+import query
 
 QUERY_EMB = [1.0] + [0.0] * 1023
 
@@ -67,7 +67,7 @@ def test_tool_list_contains_search(server):
 def test_search_returns_structured_dicts(db, server, monkeypatch):
     conn, prefix = db
     sid = prefix + "-mcp"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     _insert(conn, sid, "shiyi_test_mcp_target", QUERY_EMB, now)
     monkeypatch.setattr(query, "embed_query", lambda q: QUERY_EMB)
     monkeypatch.setattr(query, "get_db", lambda: _NoCloseConn(conn))

@@ -1,67 +1,130 @@
 # shiyi (拾遗)
 
-> 拾遗 — "to pick up what was left behind."
+Searchable long-term memory for AI agents. Shiyi ingests explicitly selected
+session or archive sources into PostgreSQL + pgvector, then exposes hybrid
+vector/BM25 search through a CLI and a read-only MCP server.
 
-Searchable long-term memory for AI agents. Ingest conversation history from agent sessions into PostgreSQL + pgvector, then query it with hybrid search (vector + BM25 + exact substring).
+## Install
 
-## What it does
-
-- **Ingest** agent conversation history (session transcripts) → chunk → embed (Voyage AI) → store in pgvector
-- **Search** past sessions with hybrid retrieval: semantic vector + BM25 full-text + exact substring (the exact-substring channel matters for short CJK entity queries like 2-4 char names)
-- **Expose** search to agents via a read-only MCP server
-
-## Components
-
-| File | Role |
-|------|------|
-| `ingest.py` | Session ingestion pipeline (chunk → embed → store) |
-| `ingest_hermes.py` | Bridge for Hermes-era sqlite session store |
-| `ingest_discord.py` | Discord archive ingestion |
-| `query.py` | Hybrid search (vector + BM25 + exact substring) |
-| `mcp_server.py` | Read-only MCP stdio server wrapping `query.search` |
-| `schema.sql` | PostgreSQL schema |
-| `deploy/` | Docker Compose + run script |
-
-## Quick start
-
-Prerequisites: PostgreSQL with pgvector, a Voyage AI API key.
+The supported installation is a normal Python package. Python 3.11–3.13 is
+supported; `uv` is used in this repository for reproducible development.
 
 ```bash
-# 1. Start the database
-cd deploy && ./run.sh          # reads db creds, starts postgres+pgvector
-
-# 2. Apply schema
-psql -h 127.0.0.1 -p 5433 -U <user> -d <db> -f schema.sql
-
-# 3. Ingest sessions
-python3 ingest.py              # OpenClaw-era session dir
-python3 ingest_hermes.py       # Hermes-era sqlite store
-python3 ingest_discord.py      # Discord archive
-
-# 4. Search
-python3 query.py "what did we decide about X?"
-
-# 5. Serve via MCP
-python3 mcp_server.py
+uv sync --extra dev
+uv run shiyi --help
 ```
 
-## Configuration
+The package can also be built and installed by ordinary PEP 517 tooling:
 
-Paths are configurable via environment variables (defaults shown):
+```bash
+uv build
+python -m pip install dist/*.whl
+```
 
-| Env var | Default | Purpose |
-|---------|---------|---------|
-| `SHIYI_SESSIONS_DIR` | `~/.openclaw/agents/main/sessions` | Session transcript dir |
-| `SHIYI_VOYAGE_KEY` | `~/.openclaw/credentials/voyage-api-key.txt` | Voyage API key file |
-| `SHIYI_PG_CRED` | `~/.openclaw/credentials/session-memory-pg.txt` | PG connection creds file |
+## Configure explicitly
+
+There are no implicit source, database, credential, or embedding-provider
+paths. A command must identify its source and production embedding settings.
+Configuration precedence is:
+
+1. explicit keyword values used by the Python API;
+2. `SHIYI_*` environment variables;
+3. the selected JSON/TOML file (`--config` or `SHIYI_CONFIG_FILE`);
+4. safe numeric defaults for chunking, retries, and lock IDs only.
+
+Minimal environment example (use a secret manager or a mode-0600 file for
+the key; never commit or paste it):
+
+```bash
+export SHIYI_SESSIONS_DIR=/srv/shiyi/sessions
+export SHIYI_DATABASE_DSN='postgresql://user:password@db.example/shiyi'
+export SHIYI_EMBEDDING_PROVIDER=voyage
+export SHIYI_VOYAGE_API_KEY='provided-by-your-secret-manager'
+export SHIYI_VOYAGE_MODEL=voyage-4-large
+export SHIYI_EMBED_DIM=1024
+```
+
+Instead of putting a key in the environment, set
+`SHIYI_VOYAGE_KEY_FILE=/secure/shiyi/voyage.key`. PostgreSQL may use a DSN or
+an explicit `SHIYI_PG_CRED` key/value file. Diagnostics redact API keys and
+DSN passwords.
+
+The old OpenClaw/Hermes paths are available only with the explicit
+`--legacy-openclaw` migration switch. That switch is for a deliberate,
+temporary migration and does not change the default configuration.
+
+## CLI and MCP
+
+The source is selected on every ingest invocation; no source is silently
+discovered:
+
+```bash
+shiyi ingest --source sessions
+shiyi ingest --source hermes
+shiyi ingest --source discord --file /srv/shiyi/archive/channel.jsonl
+shiyi ingest --source sessions --dry-run
+shiyi query 'what did we decide about X?' --limit 5
+shiyi serve
+```
+
+`--dry-run` parses and chunks the selected source without opening PostgreSQL
+or calling the embedding provider. Normal commands fail with a structured
+error if the source, database, provider, key, model, or dimension is absent.
+The MCP server exposes only the read-only `search` tool.
+
+The original script entry points remain as compatibility wrappers and accept
+the same `--config` and `--legacy-openclaw` switches. New deployments should
+use the installed `shiyi` command.
+
+## PostgreSQL + pgvector
+
+The local deployment uses the official `pgvector/pgvector:pg17` image. It
+does not use an external or pre-named Docker volume. The default data directory
+is the project-local `.data/postgres` (ignored by Git), and both the port and
+data directory can be changed with `SHIYI_PG_PORT` and
+`SHIYI_PG_DATA_DIR`.
+
+```bash
+SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d
+psql -h 127.0.0.1 -p 5433 -U <user> -d <db> -f schema.sql
+```
+
+The credential file is explicit `key=value` data with `dbname`, `user`, and
+`password` entries. `deploy/run.sh` never prints its contents and does not
+look in a home-directory fallback.
+
+## Tests and CI
+
+The default test run is safe without PostgreSQL: database tests skip unless
+all three opt-in variables are present:
+
+```text
+SHIYI_TEST_DATABASE_DSN
+SHIYI_TEST_DATABASE_NAME
+SHIYI_TEST_DATABASE_MARKER
+```
+
+When enabled, the test fixture verifies both the connected database name and
+a marker row before any test cleanup. It deletes only rows in its own reserved
+`test-<run-id>` namespace. CI creates a random database and marker on its
+ephemeral PostgreSQL service, applies `schema.sql`, and runs the same suite.
+Embedding unit tests use deterministic synthetic vectors; production never
+selects a fake provider implicitly.
+
+```bash
+uv run ruff check .
+uv run pyright
+uv run pytest -q
+```
 
 ## Search behavior
 
-Hybrid retrieval merges three channels:
-1. **Vector** (Voyage embeddings, cosine) — semantic similarity
-2. **BM25** (PostgreSQL tsvector) — keyword/lexical match
-3. **Exact substring** (ILIKE, for queries ≤ 20 chars) — reliable for short entity names where vector and BM25 both dilute
+Hybrid retrieval combines semantic vector similarity, PostgreSQL full-text
+ranking, and exact substring matching for short queries. Results then apply
+temporal decay and MMR-style similarity suppression.
 
 ## License
 
-MIT
+The project is MIT-licensed in `LICENSE`. Direct dependency notices and the
+offline metadata check are in `THIRD_PARTY_NOTICES.md`; MIT does not relicense
+those dependencies.

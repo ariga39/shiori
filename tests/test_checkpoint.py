@@ -1,13 +1,13 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import ingest
 
-TS = datetime(2026, 8, 3, 1, 0, 0, tzinfo=timezone.utc)
+TS = datetime(2026, 8, 3, 1, 0, 0, tzinfo=UTC)
 
 
 def test_mark_records_real_size(db):
     conn, prefix = db
-    path = "%s/full.jsonl" % prefix
+    path = f"{prefix}/full.jsonl"
     ingest.mark_file_processed(conn, path, TS, 100, "main_user", 5, partial=False)
     proc = ingest.get_processed_files(conn)
     assert proc[path]["size"] == 100
@@ -16,7 +16,7 @@ def test_mark_records_real_size(db):
 
 def test_mark_partial_forces_retry_with_size_zero(db):
     conn, prefix = db
-    path = "%s/partial.jsonl" % prefix
+    path = f"{prefix}/partial.jsonl"
     ingest.mark_file_processed(conn, path, TS, 100, "main_user", 2, partial=False)
     proc = ingest.get_processed_files(conn)
     assert proc[path]["size"] == 100
@@ -29,7 +29,7 @@ def test_mark_partial_forces_retry_with_size_zero(db):
 
 def test_remark_unchanged_is_idempotent(db):
     conn, prefix = db
-    path = "%s/idem.jsonl" % prefix
+    path = f"{prefix}/idem.jsonl"
     # mark as fully processed (mtime + size recorded).
     ingest.mark_file_processed(conn, path, TS, 500, "main_user", 9, partial=False)
     proc = ingest.get_processed_files(conn)
@@ -44,7 +44,7 @@ def test_remark_unchanged_is_idempotent(db):
 
 def test_full_mark_enables_skip_on_unchanged(db):
     conn, prefix = db
-    path = "%s/skip.jsonl" % prefix
+    path = f"{prefix}/skip.jsonl"
     # Full successful ingest → file_size == real size.
     ingest.mark_file_processed(conn, path, TS, 321, "main_user", 4, partial=False)
     proc = ingest.get_processed_files(conn)

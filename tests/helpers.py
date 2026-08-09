@@ -3,7 +3,7 @@ def make_chunk(i, sid, content=None, ts_start="2026-08-03T00:00:00Z",
     return {
         "session_id": sid,
         "source_type": source_type,
-        "content": content if content is not None else "test chunk %d" % i,
+        "content": content if content is not None else f"test chunk {i}",
         "timestamp_start": ts_start,
         "timestamp_end": ts_end,
         "turn_index_start": i,

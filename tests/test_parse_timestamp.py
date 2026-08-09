@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import ingest
 
@@ -21,12 +21,12 @@ def test_iso_fractional_parses():
 
 def test_epoch_seconds_parses():
     ts = ingest.parse_timestamp(1785760496)
-    assert ts == datetime(2026, 8, 3, 12, 34, 56, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 8, 3, 12, 34, 56, tzinfo=UTC)
 
 
 def test_epoch_milliseconds_parses_same():
     ts = ingest.parse_timestamp(1785760496000)
-    assert ts == datetime(2026, 8, 3, 12, 34, 56, tzinfo=timezone.utc)
+    assert ts == datetime(2026, 8, 3, 12, 34, 56, tzinfo=UTC)
 
 
 def test_bad_format_returns_none():

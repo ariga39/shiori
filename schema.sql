@@ -1,11 +1,9 @@
 -- session-memory-pg schema
 --
--- Canonical DDL for the `session_memory` database. This file documents the
--- live structure, verified column-by-column against the running PostgreSQL 17
--- + pgvector instance (pg_dump --schema-only + information_schema on
--- 2026-08-03). Column nullability / DEFAULT / type are copied exactly from the
--- live catalog, including the `session_facts` table that exists in the live DB
--- but is not referenced by any source file (see docs/DESIGN.md §3.3).
+-- Canonical DDL for a fresh `shiyi` database. The historical live database had
+-- a legacy embedding_model default; fresh installs intentionally require every
+-- write to declare its provider/model instead of silently selecting one. An
+-- existing database needs an explicit migration before applying this change.
 --
 -- ⚠️  IMPORTANT (NB-C5-07): every statement uses `IF NOT EXISTS`, which is only
 -- a bootstrap guard for an EMPTY database. It does NOT repair drift in an
@@ -21,8 +19,8 @@
 -- `facts_created` are nullable in the live schema even though the insert paths
 -- always provide values; DDL below preserves that.
 --
--- Bootstrap:
---   psql -h 127.0.0.1 -p 5433 -U touko -d session_memory -f schema.sql
+-- Bootstrap (substitute operator-selected values; never commit credentials):
+--   psql -h 127.0.0.1 -p 5433 -U <user> -d <database> -f schema.sql
 -- For a fresh database, first create the db and run this file once.
 
 -- ── Extensions (idempotent) ────────────────────────────────────────────────
@@ -36,7 +34,7 @@ CREATE TABLE IF NOT EXISTS session_chunks (
     source_type        text NOT NULL DEFAULT 'main_user',
     content            text NOT NULL,
     embedding          vector(1024),                        -- nullable: aborted batch
-    embedding_model    text NOT NULL DEFAULT 'qwen3-embedding-0.6b',  -- INSERT 必显式写 model；默认值仅历史遗留（live 旧行）
+    embedding_model    text NOT NULL,                       -- provider/model is explicit in every write
     timestamp_start    timestamptz,                         -- nullable
     timestamp_end      timestamptz,                         -- nullable
     turn_index_start   integer,
@@ -68,7 +66,7 @@ CREATE TABLE IF NOT EXISTS session_facts (
     category         text NOT NULL,
     content          text NOT NULL,
     embedding        vector(1024),
-    embedding_model  text NOT NULL DEFAULT 'qwen3-embedding-0.6b',
+    embedding_model  text NOT NULL,
     "timestamp"      timestamptz NOT NULL,
     task_summary     text,
     metadata         jsonb DEFAULT '{}'::jsonb,             -- nullable in live

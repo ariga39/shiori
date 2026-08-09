@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes Session Memory Ingestion (bridge for ~/.hermes/state.db)
+Hermes Session Memory Ingestion (bridge for an explicitly configured SQLite store)
 
 Reads Hermes' sqlite session store (sessions + messages tables), filters to
 user/assistant text messages, chunks with the same token-based logic as
@@ -20,26 +20,35 @@ Design notes:
 import argparse
 import logging
 import os
-import time
-from datetime import datetime, timezone
-
 import sqlite3  # uv venv python (3.53.1) — WAL-reset safe
+from datetime import UTC, datetime
 
 import ingest  # reuse chunk/embed/store logic from the OpenClaw pipeline
+from shiyi.config import load_config
 
-HERMES_DB = os.path.expanduser("~/.hermes/state.db")
+HERMES_DB = None
 HERMES_ADVISORY_LOCK_ID = 784322
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("/tmp/hermes-ingest.log"),
-        logging.StreamHandler(),
-    ],
-    force=True,
+    handlers=[logging.StreamHandler()],
 )
 log = logging.getLogger("hermes_ingest")
+
+
+def configure_logging(settings):
+    """Add only the explicitly configured log file."""
+    if settings.log_file is None:
+        return
+    settings.log_file.parent.mkdir(parents=True, exist_ok=True)
+    if not any(
+        isinstance(handler, logging.FileHandler) and handler.baseFilename == str(settings.log_file)
+        for handler in log.handlers
+    ):
+        handler = logging.FileHandler(settings.log_file, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        log.addHandler(handler)
 
 # Source mapping: OpenClaw pipeline uses 'main_user'/'discord'/'subagent'/'cron'.
 # Hermes session.source is discord|tui|cron|subagent — map to the same vocabulary.
@@ -51,10 +60,13 @@ SOURCE_MAP = {
 }
 
 
-def open_hermes_db():
-    if not os.path.exists(HERMES_DB):
-        raise FileNotFoundError(f"Hermes state.db not found: {HERMES_DB}")
-    conn = sqlite3.connect(f"file:{HERMES_DB}?mode=ro", uri=True)
+def open_hermes_db(path=None):
+    database = path or HERMES_DB
+    if database is None:
+        database = load_config().require_source("hermes")
+    if not os.path.exists(database):
+        raise FileNotFoundError(f"Hermes state.db not found: {database}")
+    conn = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -180,12 +192,26 @@ def mark_hermes_processed(conn, filepath, mtime, message_count, rewind_count,
     cur.close()
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Hermes session memory ingestion")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     parser.add_argument("--force", action="store_true", help="Reprocess all sessions")
     parser.add_argument("--session", help="Process only this session id (for testing)")
-    args = parser.parse_args()
+    parser.add_argument("--config", help="JSON/TOML config file")
+    parser.add_argument(
+        "--legacy-openclaw",
+        action="store_true",
+        help="Explicit migration mode: use legacy Hermes path when SHIYI_* is unset",
+    )
+    args = parser.parse_args(argv)
+
+    settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
+    ingest.apply_settings(settings)
+    global HERMES_DB
+    if settings.hermes_db is not None:
+        HERMES_DB = str(settings.hermes_db)
+    ingest.configure_logging(settings)
+    configure_logging(settings)
 
     log.info("=== Hermes Session Memory Ingestion ===%s", " [DRY-RUN]" if args.dry_run else "")
 
@@ -217,7 +243,7 @@ def main():
         for s in sessions:
             key = "hermes://" + s["session_id"]
             prev = processed.get(key)
-            mtime = datetime.fromtimestamp(s["last_activity_at"], tz=timezone.utc)
+            mtime = datetime.fromtimestamp(s["last_activity_at"], tz=UTC)
             size = s["message_count"]
             unchanged = prev and prev["mtime"] == mtime and prev["size"] == size
             # rewind detection: Hermes rewind flips rows to active=0 and bumps

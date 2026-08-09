@@ -9,7 +9,18 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-import ingest
+
+# Test databases are opt-in and isolated.  Never fall back to a normal-user
+# credential file or a shared production DSN.  CI creates a random database
+# and marker table, then supplies both values below.
+_TEST_DSN = os.environ.get("SHIYI_TEST_DATABASE_DSN")
+_TEST_DB_NAME = os.environ.get("SHIYI_TEST_DATABASE_NAME")
+_TEST_DB_MARKER = os.environ.get("SHIYI_TEST_DATABASE_MARKER")
+if _TEST_DSN:
+    # Existing legacy tests call ingest.load_credentials directly.  Make that
+    # explicit test DSN visible to the application without allowing ambient
+    # home credentials to participate.
+    os.environ["SHIYI_DATABASE_DSN"] = _TEST_DSN
 
 # Independent, known-good 1024-dim embedding vector (matches voyage-4-large).
 VALID_EMB = [0.01] * 1024
@@ -18,14 +29,25 @@ WRONG_EMB = [0.0, 0.0]
 
 
 def _connect():
-    creds = ingest.load_credentials()
-    return psycopg2.connect(
-        host=creds["host"],
-        port=int(creds["port"]),
-        dbname=creds["dbname"],
-        user=creds["user"],
-        password=creds["password"],
-    )
+    if not (_TEST_DSN and _TEST_DB_NAME and _TEST_DB_MARKER):
+        pytest.skip(
+            "isolated PostgreSQL not configured; set SHIYI_TEST_DATABASE_DSN, "
+            "SHIYI_TEST_DATABASE_NAME, and SHIYI_TEST_DATABASE_MARKER"
+        )
+    conn = psycopg2.connect(_TEST_DSN)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_database()")
+            database_name = cur.fetchone()[0]
+            cur.execute("SELECT marker FROM shiyi_test_guard")
+            marker = cur.fetchone()[0]
+    except Exception:
+        conn.close()
+        raise
+    if database_name != _TEST_DB_NAME or marker != _TEST_DB_MARKER:
+        conn.close()
+        raise RuntimeError("refusing to use a non-matching isolated shiyi test database")
+    return conn
 
 
 @pytest.fixture
@@ -48,23 +70,15 @@ def db_unused():
 def db():
     """Real DB connection + a unique test session prefix. Cleans up after.
 
-    All tests allocate rows under the reserved `test-` session_id namespace. At
-    setup we wipe that namespace so any rows left behind by a prior interrupted
-    run (whose teardown never executed) cannot survive into this run. Without
-    this, a leftover row whose content/vector is identical to a freshly-inserted
-    test row gets collapsed by query MMR (threshold 0.85), so a recall test's
-    `len(mine) == 2` assertion intermittently sees only 1 row (NB-C7-01).
-    Wiping the reserved namespace at setup guarantees each test sees only its own
-    rows, independently of the ~20k-row live table's HNSW ef_search setting.
+    All tests allocate rows under a unique `test-<uuid>` session_id namespace.
+    The fixture never wipes a shared `test-%` prefix: that could delete another
+    job's rows when an operator intentionally points two test processes at the
+    same reserved database. The CI contract supplies a fresh random database;
+    interrupted local rows remain isolated by their unique prefix.
     """
     conn = _connect()
-    session_prefix = "test-%s" % uuid.uuid4().hex
+    session_prefix = f"test-{uuid.uuid4().hex}"
     try:
-        cur = conn.cursor()
-        cur.execute("DELETE FROM session_chunks WHERE session_id LIKE 'test-%'")
-        cur.execute("DELETE FROM ingestion_state WHERE file_path LIKE 'test-%'")
-        conn.commit()
-        cur.close()
         yield conn, session_prefix
     finally:
         try:

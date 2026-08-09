@@ -15,7 +15,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg2
@@ -23,12 +23,17 @@ import psycopg2.sql
 import requests
 import tiktoken
 
+from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
+
 # ── Config ───────────────────────────────────────────────────────────────────
-ARCHIVE_DIR = Path(os.path.expanduser("~/.openclaw/workspace/data/discord-archive"))
+ARCHIVE_DIR = None
+PG_CRED_PATH = None
+DATABASE_DSN = None
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
 VOYAGE_MODEL = "voyage-4-large"
-VOYAGE_KEY_PATH = os.path.expanduser("~/.openclaw/credentials/voyage-api-key.txt")
+VOYAGE_KEY_PATH = None
+VOYAGE_API_KEY = None
 EMBED_DIM = 1024
 
 CHUNK_TOKENS = 400
@@ -40,41 +45,102 @@ MAX_RETRIES = 3
 ADVISORY_LOCK_ID = 784322  # different from ingest.py
 
 ALLOWED_TYPES = {0, 19}
-LOG_FILE = "/tmp/discord-ingest.log"
+LOG_FILE = None
 
 _enc = tiktoken.get_encoding("cl100k_base")
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[logging.StreamHandler(sys.stderr)],
 )
 log = logging.getLogger(__name__)
 
 
+def apply_settings(settings: Settings) -> None:
+    global ARCHIVE_DIR, PG_CRED_PATH, DATABASE_DSN
+    global VOYAGE_API_URL, VOYAGE_KEY_PATH, VOYAGE_API_KEY, VOYAGE_MODEL, EMBED_DIM
+    global CHUNK_TOKENS, CHUNK_OVERLAP, VOYAGE_BATCH_SIZE, VOYAGE_RPS_LIMIT
+    global EMBED_TIMEOUT, MAX_RETRIES, ADVISORY_LOCK_ID, LOG_FILE
+
+    if settings.discord_archive_dir is not None:
+        ARCHIVE_DIR = settings.discord_archive_dir
+    if settings.pg_cred_file is not None:
+        PG_CRED_PATH = str(settings.pg_cred_file)
+    if settings.database_dsn is not None:
+        DATABASE_DSN = settings.database_dsn
+    if settings.voyage_api_url is not None:
+        VOYAGE_API_URL = settings.voyage_api_url
+    if settings.voyage_key_file is not None:
+        VOYAGE_KEY_PATH = str(settings.voyage_key_file)
+    if settings.voyage_api_key is not None:
+        VOYAGE_API_KEY = settings.voyage_api_key
+    if settings.voyage_model is not None:
+        VOYAGE_MODEL = settings.voyage_model
+    if settings.embed_dim is not None:
+        EMBED_DIM = settings.embed_dim
+    if settings.log_file is not None:
+        LOG_FILE = str(settings.log_file)
+    CHUNK_TOKENS = settings.chunk_tokens
+    CHUNK_OVERLAP = settings.chunk_overlap
+    VOYAGE_BATCH_SIZE = settings.voyage_batch_size
+    VOYAGE_RPS_LIMIT = settings.voyage_rps_limit
+    EMBED_TIMEOUT = settings.embed_timeout
+    MAX_RETRIES = settings.max_retries
+    ADVISORY_LOCK_ID = settings.discord_lock_id
+
+
+def configure_logging(settings: Settings) -> None:
+    if settings.log_file is None:
+        return
+    settings.log_file.parent.mkdir(parents=True, exist_ok=True)
+    if not any(isinstance(handler, logging.FileHandler) and handler.baseFilename == str(settings.log_file) for handler in log.handlers):
+        handler = logging.FileHandler(settings.log_file, encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+        log.addHandler(handler)
+
+
 # ── Credentials ──────────────────────────────────────────────────────────────
 def _read_voyage_key():
-    with open(VOYAGE_KEY_PATH) as f:
-        return f.read().strip()
+    if VOYAGE_API_KEY:
+        return VOYAGE_API_KEY
+    if VOYAGE_KEY_PATH:
+        try:
+            with open(VOYAGE_KEY_PATH, encoding="utf-8") as f:
+                value = f.read().strip()
+        except OSError as exc:
+            raise ConfigError("Voyage key file cannot be read", code="key_file_unreadable") from exc
+        if not value:
+            raise ConfigError("Voyage key file is empty", code="key_file_empty")
+        return value
+    return load_config().read_voyage_key()
 
 
-def load_credentials():
-    cred_path = os.path.expanduser("~/.openclaw/credentials/session-memory-pg.txt")
-    creds = {}
-    with open(cred_path) as fh:
-        for raw_line in fh:
-            raw_line = raw_line.strip()
-            if "=" in raw_line:
-                k, v = raw_line.split("=", 1)
-                creds[k.strip()] = v.strip()
-    return creds
+def load_credentials(path=None):
+    if path is not None:
+        creds = {}
+        with open(path, encoding="utf-8") as fh:
+            for raw_line in fh:
+                raw_line = raw_line.strip()
+                if "=" in raw_line:
+                    k, v = raw_line.split("=", 1)
+                    creds[k.strip()] = v.strip()
+        return creds
+    if PG_CRED_PATH:
+        return load_credentials(PG_CRED_PATH)
+    return credentials_from_settings(load_config())
 
 
 def get_db():
+    if DATABASE_DSN:
+        return psycopg2.connect(DATABASE_DSN)
     creds = load_credentials()
+    if "dsn" in creds:
+        return psycopg2.connect(creds["dsn"])
+    required = ("host", "port", "dbname", "user", "password")
+    missing = [key for key in required if key not in creds or not creds[key]]
+    if missing:
+        raise ConfigError("database credentials missing: " + ", ".join(missing), code="invalid_database_config")
     return psycopg2.connect(
         host=creds["host"],
         port=int(creds["port"]),
@@ -125,7 +191,7 @@ def parse_discord_timestamp(msg):
 
 def load_messages(jsonl_path):
     messages = []
-    with open(jsonl_path, "r", encoding="utf-8") as fh:
+    with open(jsonl_path, encoding="utf-8") as fh:
         for line_no, line in enumerate(fh, 1):
             line = line.strip()
             if not line:
@@ -390,12 +456,22 @@ def mark_file_processed(conn, filepath, mtime, size, source_type, chunks_created
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Discord Archive Ingestion (v2 – Voyage)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
     parser.add_argument("--file", type=str, help="Process only this JSONL file")
     parser.add_argument("--force", action="store_true", help="Reprocess all files")
-    args = parser.parse_args()
+    parser.add_argument("--config", help="JSON/TOML config file")
+    parser.add_argument(
+        "--legacy-openclaw",
+        action="store_true",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+    )
+    args = parser.parse_args(argv)
+
+    settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
+    apply_settings(settings)
+    configure_logging(settings)
 
     log.info("=== Discord Ingest v2 (Voyage) ===%s", " [DRY-RUN]" if args.dry_run else "")
 
@@ -418,6 +494,11 @@ def main():
         if args.file:
             jsonl_files = [Path(args.file)]
         else:
+            if ARCHIVE_DIR is None:
+                raise ConfigError(
+                    "discord source is disabled; set SHIYI_DISCORD_ARCHIVE_DIR",
+                    code="source_not_configured",
+                )
             jsonl_files = sorted(ARCHIVE_DIR.glob("*.jsonl"))
 
         total_msgs = 0
@@ -433,7 +514,7 @@ def main():
             channel_name = jsonl_path.stem
             filepath = str(jsonl_path.resolve())
             stat = os.stat(jsonl_path)
-            mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            mtime = datetime.fromtimestamp(stat.st_mtime, tz=UTC)
             size = stat.st_size
             prev = processed.get(filepath)
             if prev and prev["mtime"] == mtime and prev["size"] == size:
