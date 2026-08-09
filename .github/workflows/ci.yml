@@ -58,6 +58,46 @@ jobs:
       - name: Install PostgreSQL client
         run: sudo apt-get update && sudo apt-get install --yes postgresql-client
 
+      - name: Enable pgvector preload and verify service parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+            --set ON_ERROR_STOP=1 \
+            --command "ALTER SYSTEM SET shared_preload_libraries = 'vector';"
+
+          mapfile -t containers < <(
+            docker ps --filter 'ancestor=pgvector/pgvector:pg17' --format '{{.ID}}'
+          )
+          if (( ${#containers[@]} != 1 )); then
+            echo "expected exactly one pgvector service container" >&2
+            exit 1
+          fi
+          docker restart "${containers[0]}" >/dev/null
+
+          ready=false
+          for _ in {1..60}; do
+            if pg_isready --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${ready}" != true ]]; then
+            echo "pgvector service did not become ready after restart" >&2
+            exit 1
+          fi
+
+          loaded="$(
+            psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+              --set ON_ERROR_STOP=1 --tuples-only --no-align \
+              --command 'SHOW shared_preload_libraries;'
+          )"
+          if ! grep -Eq '(^|[,[:space:]])vector([,[:space:]]|$)' <<<"${loaded}"; then
+            echo "pgvector preload verification failed" >&2
+            exit 1
+          fi
+
       - name: Prepare isolated database
         shell: bash
         run: |
