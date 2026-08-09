@@ -101,6 +101,8 @@ def repository_health(conn, *, migrations_dir: pathlib.Path | None = None) -> di
         state = "current"
 
     ok = state == "current" and not missing and not missing_ext
+    # Writes are rejected for every state that is not a clean current DB.
+    writes_rejected = state != "current"
     return {
         "ok": ok,
         "state": state,
@@ -110,7 +112,7 @@ def repository_health(conn, *, migrations_dir: pathlib.Path | None = None) -> di
         "extensions": extensions,
         "missing_tables": missing,
         "missing_extensions": missing_ext,
-        "writes_rejected": state == "ahead",
+        "writes_rejected": writes_rejected,
     }
 
 
@@ -249,50 +251,51 @@ def backup(
 
     env = dict(os.environ)
     env["PGPASSWORD"] = _pgpassword(conn)
-    try:
-        proc = subprocess.run(
-            [
-                pg_dump,
-                "--format=custom",
-                f"--host={params['host']}",
-                f"--port={params['port']}",
-                f"--username={params['user']}",
-                params["dbname"],
-            ],
-            env=env,
-            check=True,
-            capture_output=True,
-        )
-    except subprocess.CalledProcessError:
-        raise MigrationError(
-            "pg_tool_failed",
-            f"postgres tool failed: {pg_dump} (see logs; error redacted)",
-        ) from None
-    except FileNotFoundError as exc:
-        raise MigrationError("pg_tool_missing", f"postgres tool not found: {exc.filename}") from exc
-    digest = hashlib.sha256(proc.stdout).hexdigest()[:16]
-    manifest = {
-        "manifest_version": MANIFEST_VERSION,
-        "format": "pg_dump-custom",
-        "schema_head": head,
-        "schema_head_checksum": head_checksum,
-        "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
-        "dump_digest": digest,
-    }
     dump_tmp = dest.with_name(f".{dest.name}.tmp-{uuid.uuid4().hex[:8]}")
     manifest_tmp = dest.with_name(f".{dest.name}.manifest.tmp-{uuid.uuid4().hex[:8]}")
     try:
+        # Pre-create the protected 0600 temp target, then let pg_dump write
+        # directly to it (bounded by disk, no in-memory stdout payload).
         fd = os.open(dump_tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         try:
-            with os.fdopen(fd, "wb") as fh:
-                fh.write(proc.stdout)
-                fh.flush()
-                os.fsync(fh.fileno())
+            subprocess.run(
+                [
+                    pg_dump,
+                    "--format=custom",
+                    f"--host={params['host']}",
+                    f"--port={params['port']}",
+                    f"--username={params['user']}",
+                    params["dbname"],
+                ],
+                env=env,
+                check=True,
+                stdout=fd,
+                stderr=subprocess.PIPE,
+            )
+        except subprocess.CalledProcessError:
+            raise MigrationError(
+                "pg_tool_failed",
+                f"postgres tool failed: {pg_dump} (see logs; error redacted)",
+            ) from None
+        except FileNotFoundError as exc:
+            raise MigrationError("pg_tool_missing", f"postgres tool not found: {exc.filename}") from exc
         finally:
+            # fsync the fd before close so the temp file is durable.
             try:
-                os.close(fd)
+                os.fsync(fd)
             except OSError:
                 pass
+            os.close(fd)
+        with open(dump_tmp, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+        manifest = {
+            "manifest_version": MANIFEST_VERSION,
+            "format": "pg_dump-custom",
+            "schema_head": head,
+            "schema_head_checksum": head_checksum,
+            "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            "dump_digest": digest,
+        }
         _atomic_write_0600(manifest_tmp, json.dumps(manifest, sort_keys=True))
         os.rename(dump_tmp, dest)
         try:
@@ -358,24 +361,37 @@ def _verify_manifest(manifest_path: pathlib.Path, dump_path: pathlib.Path) -> di
     return manifest
 
 
+_SAFE_DB_NAME = __import__("re").compile(r"^[a-z][a-z0-9_]{0,62}$")
+
+
+def _validate_db_name(name: str) -> str:
+    """Validate a database name with a safe grammar so it can never be
+    interpreted as a createdb/dropdb option."""
+    if not isinstance(name, str) or not _SAFE_DB_NAME.fullmatch(name):
+        raise MigrationError(
+            "invalid_db_name",
+            "target database name must match ^[a-z][a-z0-9_]{0,62}$",
+        )
+    return name
+
+
 def restore(
     conn,
     src: pathlib.Path,
     *,
     target_name: str,
-    marker: str | None = None,
     migrations_dir: pathlib.Path | None = None,
     pg_restore: str = "pg_restore",
 ) -> dict[str, Any]:
     """Restore a backup into a freshly created, random-marker staging DB.
 
     Refuses to restore into the current/any existing database.  Creates a new
-    empty target with ``target_name``, binds a generated random ``marker`` in
-    ``shiyi_restore_guard``, runs argv-only ``pg_restore``, then migrates and
-    verifies health.  The manifest schema head/checksum must match the current
-    code head.  Returns the staging DSN for the user to switch to.  Cleanup
-    only ever drops the staging database this call created (identity re-verified
-    by marker before any drop).
+    empty target with ``target_name``, binds a generated one-time random
+    ``marker`` in ``shiyi_restore_guard``, runs argv-only ``pg_restore``, then
+    migrates and verifies health.  The manifest schema head/checksum must match
+    the current code head.  Returns the staging DSN for the user to switch to.
+    Cleanup only ever drops the staging database this call created (identity
+    re-verified by marker before any drop).
     """
     manifest = _verify_manifest(src.with_suffix(src.suffix + ".manifest.json"), src)
     if migrations_dir:
@@ -396,20 +412,20 @@ def restore(
                         "backup schema head checksum does not match code head",
                     )
 
-    if marker is None or marker == "":
-        marker = f"restore-{uuid.uuid4().hex}"
+    marker = f"restore-{uuid.uuid4().hex}"
+    staging_db = _validate_db_name(target_name)
 
     # Create a fresh staging database.
     env = dict(os.environ)
     env["PGPASSWORD"] = _pgpassword(conn)
     admin = _connection_dsn_params(conn)
-    staging_db = target_name
     _run_argv(
         [
             "createdb",
             f"--host={admin['host']}",
             f"--port={admin['port']}",
             f"--username={admin['user']}",
+            "--",
             staging_db,
         ],
         env,
@@ -438,7 +454,7 @@ def restore(
                 f"--host={admin['host']}",
                 f"--port={admin['port']}",
                 f"--username={admin['user']}",
-                "--dbname", staging_db,
+                "--dbname=" + staging_db,
                 str(src),
             ],
             env,
@@ -483,7 +499,7 @@ def restore(
             if row is not None and row[0] == marker:
                 _run_argv(
                     ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",
-                     f"--username={admin['user']}", staging_db],
+                     f"--username={admin['user']}", "--", staging_db],
                     env,
                 )
         except Exception:

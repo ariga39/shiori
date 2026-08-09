@@ -51,7 +51,6 @@ def _build_parser() -> argparse.ArgumentParser:
     restore = db_sub.add_parser("restore", help="restore a backup into a NEW staging database")
     restore.add_argument("src", help="backup path")
     restore.add_argument("--target", required=True, help="new staging database name (must not exist)")
-    restore.add_argument("--marker", required=True, help="random marker bound to this restore")
     return parser
 
 
@@ -175,7 +174,7 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
             from pathlib import Path as _Path
 
             migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
-            result = restore(conn, Path(args.src), target_name=args.target, marker=args.marker,
+            result = restore(conn, Path(args.src), target_name=args.target,
                              migrations_dir=migrations_dir)
             print(_json.dumps({"ok": result["ok"], "staging_dsn": result["staging_dsn"],
                                "marker": result["marker"], "schema_head": result["schema_head"]},

@@ -55,8 +55,42 @@ jobs:
       - name: Type-check installable package
         run: uv run pyright
 
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
+      - name: Install pinned PostgreSQL 17 client (PGDG)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ca-certificates lsb-release gnupg curl
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            --fail --silent --show-error --location \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          source /etc/os-release
+          sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null <<PGDG
+          deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+          https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main
+          PGDG
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client-17
+          pg_dump --version | grep -q ' 17\.'
+          pg_restore --version | grep -q ' 17\.'
+
+      - name: Verify pg_dump/pg_restore client matches server major version
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tool in pg_dump pg_restore; do
+            client_major="$("${tool}" --version | sed -E 's/.* ([0-9]+)\..*/\1/')"
+            server_major="$(
+              psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+                --set ON_ERROR_STOP=1 --tuples-only --no-align \
+                --command 'SHOW server_version_num;' | cut -c1-2
+            )"
+            if [[ "${client_major}" != "${server_major}" ]]; then
+              echo "${tool} client major ${client_major} != server major ${server_major}" >&2
+              exit 1
+            fi
+          done
 
       - name: Enable pgvector preload and verify service parity
         shell: bash
@@ -95,21 +129,6 @@ jobs:
           )"
           if ! grep -Eq '(^|[,[:space:]])vector([,[:space:]]|$)' <<<"${loaded}"; then
             echo "pgvector preload verification failed" >&2
-            exit 1
-          fi
-
-      - name: Verify pg_dump/pg_restore client matches server major version
-        shell: bash
-        run: |
-          set -euo pipefail
-          client_major="$(pg_dump --version | sed -E 's/.* ([0-9]+)\..*/\1/')"
-          server_major="$(
-            psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
-              --set ON_ERROR_STOP=1 --tuples-only --no-align \
-              --command 'SHOW server_version_num;' | cut -c1-2
-          )"
-          if [[ "${client_major}" != "${server_major}" ]]; then
-            echo "pg_dump client major ${client_major} != server major ${server_major}" >&2
             exit 1
           fi
 
