@@ -1,15 +1,20 @@
 """Forward-only PostgreSQL migrations for shiyi.
 
-Replaces the ``schema.sql`` ``IF NOT EXISTS`` bootstrap with an explicit,
-versioned, forward-only migration chain.  A ``shiyi_schema_migrations`` table
-records each applied migration; every migration runs inside one transaction so
-a failure rolls back that migration and leaves previously-applied versions
-untouched.  ``schema.sql`` remains as the legacy bootstrap reference and is no
-longer used for repair.
+Contract (@momoko 70445833):
+- The migration table records ``version/name/checksum/applied_at``.  An applied
+  migration whose file checksum changed on disk is fail-closed; migration files
+  are forward-only and must never be rewritten after publish.
+- ``migrate`` takes a PostgreSQL advisory lock so two concurrent processes run
+  migrations serially (never double-applied).
+- ``schema_version`` distinguishes the migration table from the head;
+  ``repository_health`` reports ``uninitialized / partial / current / drifted /
+  ahead``.  A database whose schema version exceeds the code head is ``ahead``
+  and writes must be rejected, never treated as healthy.
 """
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import pathlib
 import re
@@ -17,6 +22,7 @@ from dataclasses import dataclass
 
 _MIGRATION_FILE = re.compile(r"^(\d{4})_[a-z0-9_]+\.py$")
 MIGRATIONS_TABLE = "shiyi_schema_migrations"
+MIGRATIONS_LOCK_KEY = 784330  # dedicated advisory lock key for schema migrations
 
 
 class MigrationError(RuntimeError):
@@ -31,11 +37,10 @@ class MigrationError(RuntimeError):
 
 @dataclass(frozen=True)
 class AppliedMigration:
-    """One recorded migration row."""
-
     version: int
     name: str
     checksum: str
+    applied_at: str
 
 
 def _normalise_version(version: int) -> int:
@@ -70,17 +75,25 @@ def _ensure_migrations_table(conn) -> None:
 
 def _applied(conn) -> dict[int, AppliedMigration]:
     with conn.cursor() as cur:
-        cur.execute(f"SELECT version, name, checksum FROM {MIGRATIONS_TABLE} ORDER BY version")
+        cur.execute(
+            f"SELECT version, name, checksum, applied_at FROM {MIGRATIONS_TABLE} ORDER BY version"
+        )
         rows = cur.fetchall()
     return {
-        int(version): AppliedMigration(version=int(version), name=name, checksum=checksum)
-        for version, name, checksum in rows
+        int(version): AppliedMigration(
+            version=int(version), name=name, checksum=checksum, applied_at=str(applied_at)
+        )
+        for version, name, checksum, applied_at in rows
     }
 
 
-def _checksum(text: str) -> str:
-    import hashlib
+def applied_migrations(conn) -> dict[int, AppliedMigration]:
+    """Public read of applied migrations (returns {} when table absent)."""
+    _ensure_migrations_table(conn)
+    return _applied(conn)
 
+
+def _checksum(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
@@ -101,72 +114,87 @@ def available_migrations(migrations_dir: pathlib.Path) -> dict[int, tuple[str, p
     return {version: (path.stem, path) for version, path in _migrations_in(migrations_dir)}
 
 
+def code_head(migrations_dir: pathlib.Path) -> int:
+    """Highest version shipped in the code (0 if no migration files)."""
+    available = available_migrations(migrations_dir)
+    return max(available, default=0)
+
+
+def schema_version(conn) -> int:
+    """Highest applied migration version (0 if table missing/empty)."""
+    _ensure_migrations_table(conn)
+    applied = _applied(conn)
+    return max(applied, default=0)
+
+
 def migrate(
     conn,
     *,
     migrations_dir: pathlib.Path,
     target: int | None = None,
 ) -> list[str]:
-    """Apply all unapplied forward migrations up to ``target``.
+    """Apply all unapplied forward migrations up to ``target``, serialized.
 
-    Every migration runs in its own transaction.  A failing migration rolls
-    back and raises ``MigrationError``; previously-applied versions are
-    untouched.  Returns the list of applied migration names.
+    Takes an advisory lock for the whole run so concurrent ``migrate`` calls
+    never double-apply.  Each migration runs in its own transaction; a failure
+    rolls back that migration and leaves previously-applied versions untouched.
+    Returns the list of applied migration names.
     """
     _ensure_migrations_table(conn)
-    applied = _applied(conn)
-    available = available_migrations(migrations_dir)
-    if not available:
-        raise MigrationError("no_migrations", f"no migration files under {migrations_dir}")
-    ordered = sorted(available.items())
-    max_available = ordered[-1][0]
-    if target is not None:
-        _normalise_version(target)
-        if target > max_available:
-            raise MigrationError(
-                "target_beyond_head",
-                f"target {target} exceeds head {max_available}",
-                version=target,
-            )
-        ordered = [(v, path) for v, path in ordered if v <= target]
-
-    applied_names: list[str] = []
-    for version, (name, path) in ordered:
-        prior = applied.get(version)
-        if prior is not None:
-            text = path.read_text(encoding="utf-8")
-            if prior.checksum != _checksum(text):
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_lock(%s)", (MIGRATIONS_LOCK_KEY,))
+    try:
+        applied = _applied(conn)
+        available = available_migrations(migrations_dir)
+        if not available:
+            raise MigrationError("no_migrations", f"no migration files under {migrations_dir}")
+        ordered = sorted(available.items())
+        max_available = ordered[-1][0]
+        if target is not None:
+            _normalise_version(target)
+            if target > max_available:
                 raise MigrationError(
-                    "migration_checksum_mismatch",
-                    f"already-applied migration {version} changed on disk",
+                    "target_beyond_head",
+                    f"target {target} exceeds head {max_available}",
+                    version=target,
+                )
+            ordered = [(v, path) for v, path in ordered if v <= target]
+
+        applied_names: list[str] = []
+        for version, (name, path) in ordered:
+            prior = applied.get(version)
+            text = path.read_text(encoding="utf-8")
+            checksum = _checksum(text)
+            if prior is not None:
+                if prior.checksum != checksum:
+                    raise MigrationError(
+                        "migration_checksum_mismatch",
+                        f"already-applied migration {version} changed on disk",
+                        version=version,
+                    )
+                continue
+            module = _load_migration(path)
+            upgrade = getattr(module, "upgrade", None)
+            if not callable(upgrade):
+                raise MigrationError("migration_invalid", f"migration {name} has no upgrade()", version=version)
+            try:
+                with conn.cursor() as cur:
+                    upgrade(cur)
+                    cur.execute(
+                        f"INSERT INTO {MIGRATIONS_TABLE} (version, name, checksum) VALUES (%s, %s, %s)",
+                        (version, name, checksum),
+                    )
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001 - structured migration failure
+                conn.rollback()
+                raise MigrationError(
+                    "migration_failed",
+                    f"migration {name} failed: {exc}",
                     version=version,
-                )
-            continue
-        module = _load_migration(path)
-        upgrade = getattr(module, "upgrade", None)
-        if not callable(upgrade):
-            raise MigrationError("migration_invalid", f"migration {name} has no upgrade()", version=version)
-        try:
-            with conn.cursor() as cur:
-                upgrade(cur)
-                cur.execute(
-                    f"INSERT INTO {MIGRATIONS_TABLE} (version, name, checksum) VALUES (%s, %s, %s)",
-                    (version, name, _checksum(path.read_text(encoding="utf-8"))),
-                )
-            conn.commit()
-        except Exception as exc:  # noqa: BLE001 - structured migration failure
-            conn.rollback()
-            raise MigrationError(
-                "migration_failed",
-                f"migration {name} failed: {exc}",
-                version=version,
-            ) from exc
-        applied_names.append(name)
-    return applied_names
-
-
-def schema_version(conn) -> int:
-    """Return the highest applied migration version (0 if none applied)."""
-    _ensure_migrations_table(conn)
-    applied = _applied(conn)
-    return max(applied, default=0)
+                ) from exc
+            applied_names.append(name)
+        return applied_names
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s)", (MIGRATIONS_LOCK_KEY,))
+        conn.commit()

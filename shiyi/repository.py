@@ -1,21 +1,44 @@
 """Repository health, version, and backup/restore contract for shiyi.
 
-Health checks the presence of every expected table and the two required
-PostgreSQL extensions (``vector`` for embeddings, ``pg_trgm`` for fallback).
-Backup/restore use PostgreSQL ``pg_dump``/``pg_restore`` semantics exposed via
-SQL-level copy (transactional) so a failed restore leaves the target unchanged.
+Contract (@momoko 70445833):
+- ``repository_health`` distinguishes ``uninitialized / partial / current /
+  drifted / ahead``; a database whose schema version exceeds the code head is
+  ``ahead`` and writes must be rejected.
+- backup uses argv-only ``pg_dump`` (no shell), credentials only via env, and
+  writes a 0600 temp file + fsync + atomic rename, refusing overwrite and
+  symlink targets.  A manifest records format version, schema head/checksum,
+  creation time, and a non-sensitive digest.
+- restore refuses in-place restore of an existing database.  It restores only
+  into a freshly created, random-marker, empty staging database, verifies the
+  result, then returns the staging DSN for the user to switch to.  Non-empty /
+  unmarked / corrupt targets and bad manifests are rejected; cleanup only ever
+  removes the staging database this operation created.
 """
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
+import os
 import pathlib
+import subprocess
+import uuid
 from typing import Any
 
-from .migrations import MigrationError, schema_version
+from .migrations import (
+    MigrationError,
+    _checksum,
+    applied_migrations,
+    available_migrations,
+    code_head,
+    migrate,
+    schema_version,
+)
 
 EXPECTED_TABLES = ("session_chunks", "ingestion_state", "session_facts")
 EXPECTED_EXTENSIONS = ("vector", "pg_trgm")
+MANIFEST_VERSION = "1"
 
 
 def _table_exists(conn, name: str) -> bool:
@@ -34,109 +57,341 @@ def _extension_installed(conn, name: str) -> bool:
         return bool(cur.fetchone()[0])
 
 
-def repository_health(conn) -> dict[str, Any]:
-    """Return structured health: version, table presence, extension presence."""
-    tables = {name: _table_exists(conn, name) for name in EXPECTED_TABLES}
-    extensions = {name: _extension_installed(conn, name) for name in EXPECTED_EXTENSIONS}
-    missing = [name for name, present in tables.items() if not present]
-    missing_ext = [name for name, present in extensions.items() if not present]
-    version = 0
+def repository_health(conn, *, migrations_dir: pathlib.Path | None = None) -> dict[str, Any]:
+    """Report health with an explicit state and required reject flags.
+
+    ``state`` is one of ``uninitialized / partial / current / drifted / ahead``.
+    """
+    head = code_head(migrations_dir) if migrations_dir else 0
     try:
         version = schema_version(conn)
     except MigrationError:
         version = 0
-    ok = not missing and not missing_ext
+    tables = {name: _table_exists(conn, name) for name in EXPECTED_TABLES}
+    extensions = {name: _extension_installed(conn, name) for name in EXPECTED_EXTENSIONS}
+    missing = [n for n, p in tables.items() if not p]
+    missing_ext = [n for n, p in extensions.items() if not p]
+
+    drifted = False
+    if migrations_dir:
+        for a in applied_migrations(conn).values():
+            # a.name is the file stem (e.g. "0001_initial"); the file is
+            # <name>.py under the migrations dir.
+            path = migrations_dir / f"{a.name}.py"
+            if not path.is_file():
+                drifted = True
+                break
+            if a.checksum != _checksum(path.read_text(encoding="utf-8")):
+                drifted = True
+                break
+
+    if head > 0 and version > head:
+        state = "ahead"
+    elif drifted:
+        state = "drifted"
+    elif version == 0:
+        state = "uninitialized"
+    elif version < head:
+        state = "partial"
+    else:
+        state = "current"
+
+    ok = state == "current" and not missing and not missing_ext
     return {
         "ok": ok,
+        "state": state,
         "version": version,
+        "head": head,
         "tables": tables,
         "extensions": extensions,
         "missing_tables": missing,
         "missing_extensions": missing_ext,
+        "writes_rejected": state == "ahead",
     }
 
 
-def _connection_dsn(conn) -> str:
+def require_writable(conn, *, migrations_dir: pathlib.Path | None = None) -> None:
+    """Reject writes to an ahead / non-current database (fail-closed)."""
+    health = repository_health(conn, migrations_dir=migrations_dir)
+    if health["state"] == "ahead":
+        raise MigrationError("database_ahead_of_code", "database schema is ahead of this code head")
+    if health["state"] in ("drifted", "partial", "uninitialized"):
+        raise MigrationError(
+            "database_not_current",
+            f"database state is {health['state']}; run `shiyi db migrate` first",
+        )
+
+
+def _connection_dsn_params(conn) -> dict[str, str]:
     info = conn.get_dsn_parameters()
-    host = info.get("host", "localhost")
-    port = info.get("port", "5432")
-    dbname = info.get("dbname", "")
-    user = info.get("user", "")
-    return f"postgresql://{user}@{host}:{port}/{dbname}"
+    return {
+        "host": info.get("host", "127.0.0.1"),
+        "port": info.get("port", "5432"),
+        "dbname": info.get("dbname", ""),
+        "user": info.get("user", ""),
+    }
 
 
-def backup_to_json(conn, dest: pathlib.Path) -> dict[str, Any]:
-    """Export the repository to a JSON backup file (transactional read).
+def _pgpassword(conn) -> str:
+    """Extract the DB password without logging it.
 
-    Never writes credentials.  Returns a small manifest with the exported
-    table/row counts and a checksum of the file.
+    psycopg2 masks the password in .dsn as ``password=xxx``, so prefer the
+    original URL/env DSN when present; otherwise fall back to PGPASSWORD.
     """
-    import hashlib
+    dsn = os.environ.get("SHIYI_DATABASE_DSN") or os.environ.get("SHIYI_PG_DSN") or os.environ.get("SHIYI_DATABASE_URL", "")
+    if "://" in dsn:
+        from urllib.parse import urlsplit
 
-    payload: dict[str, list[dict[str, Any]]] = {}
-    counts: dict[str, int] = {}
-    with conn.cursor() as cur:
-        for table in EXPECTED_TABLES:
-            if not _table_exists(conn, table):
-                raise MigrationError("missing_table", f"cannot back up missing table {table}")
-            cur.execute(f"SELECT * FROM {table}")
-            cols = [d[0] for d in cur.description]
-            rows = []
-            for row in cur.fetchall():
-                record = {}
-                for col, value in zip(cols, row):
-                    # jsonb columns come back as dict/list; serialize so the
-                    # backup file is JSON and restore can adapt cleanly.
-                    record[col] = json.dumps(value, ensure_ascii=False, default=str) if isinstance(value, (dict, list)) else value
-                rows.append(record)
-            payload[table] = rows
-            counts[table] = len(rows)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    raw = json.dumps(payload, sort_keys=True, default=str)
-    dest.write_text(raw, encoding="utf-8")
-    checksum = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    return {"ok": True, "path": str(dest), "counts": counts, "checksum": checksum}
+        parts = urlsplit(dsn)
+        if parts.password is not None:
+            return parts.password
+    # libpq key/value form: password=<value> (may be masked as xxx in .dsn)
+    raw = getattr(conn, "dsn", "") or ""
+    m = __import__("re").search(r"(?:^| )password=([^ ]+)", raw)
+    if m and m.group(1) != "xxx":
+        return m.group(1)
+    return os.environ.get("PGPASSWORD", "")
 
 
-def restore_from_json(conn, src: pathlib.Path) -> dict[str, Any]:
-    """Restore from a JSON backup transactionally.
+def _safe_output_path(dest: pathlib.Path) -> None:
+    """Reject overwrite, symlink targets, and symlink path components."""
+    if dest.exists():
+        raise MigrationError("backup_target_exists", f"backup target already exists: {dest}")
+    cursor = dest.resolve(strict=False)
+    if cursor.is_symlink():
+        raise MigrationError("backup_target_symlink", "backup target must not be a symlink")
+    parent = cursor.parent
+    while True:
+        if parent.is_symlink():
+            raise MigrationError("backup_path_symlink", "backup path traverses a symlink")
+        if parent == parent.parent:
+            break
+        parent = parent.parent
 
-    All tables are replaced in ONE transaction; any failure rolls back so the
-    target database is left unchanged (fail-closed).  An unreadable/invalid
-    source is a structured error with no write.
-    """
+
+def _run_argv(cmd: list[str], env: dict[str, str]) -> None:
     try:
-        payload = json.loads(src.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise MigrationError("backup_unreadable", f"cannot read backup {src}: {exc}") from exc
-    if not isinstance(payload, dict):
-        raise MigrationError("backup_invalid", "backup root must be an object")
+        subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise MigrationError("pg_tool_failed", f"pg tool failed: {exc}") from exc
+
+
+def _atomic_write_0600(path: pathlib.Path, data: str) -> None:
+    tmp = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex[:8]}")
     try:
-        with conn.cursor() as cur:
-            for table in EXPECTED_TABLES:
-                rows = payload.get(table)
-                if rows is None:
-                    raise MigrationError("backup_invalid", f"backup missing table {table}")
-                if not _table_exists(conn, table):
-                    raise MigrationError(
-                        "missing_table",
-                        f"cannot restore into missing table {table}; apply migrations first",
-                    )
-                cur.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
-                if rows:
-                    cols = list(rows[0].keys())
-                    placeholders = ",".join(["%s"] * len(cols))
-                    cols_sql = ",".join(f'"{c}"' for c in cols)
-                    for row in rows:
-                        cur.execute(
-                            f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})",
-                            [row.get(c) for c in cols],
-                        )
-        conn.commit()
-    except MigrationError:
-        conn.rollback()
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(data)
+                fh.flush()
+                os.fsync(fh.fileno())
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        os.rename(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
         raise
-    except Exception as exc:  # noqa: BLE001 - fail-closed restore
-        conn.rollback()
-        raise MigrationError("restore_failed", f"restore failed; target unchanged: {exc}") from exc
-    return {"ok": True, "restored": list(EXPECTED_TABLES)}
+
+
+def backup(
+    conn,
+    dest: pathlib.Path,
+    *,
+    migrations_dir: pathlib.Path | None = None,
+    pg_dump: str = "pg_dump",
+) -> dict[str, Any]:
+    """Backup via argv-only pg_dump into a 0600 temp + atomic rename.
+
+    Credentials are passed only via the environment.  A sidecar manifest
+    records format version, schema head/checksum, creation time, and a digest
+    of the dump file.  Overwrite/symlink targets are rejected.
+    """
+    _safe_output_path(dest)
+    params = _connection_dsn_params(conn)
+    head = code_head(migrations_dir) if migrations_dir else 0
+    head_checksum = ""
+    if migrations_dir and head > 0:
+        names = sorted(available_migrations(migrations_dir).items())
+        if names:
+            _, (_name, path) = names[-1]
+            head_checksum = _checksum(path.read_text(encoding="utf-8"))
+
+    env = dict(os.environ)
+    env["PGPASSWORD"] = _pgpassword(conn)
+    proc = subprocess.run(
+        [
+            pg_dump,
+            "--format=custom",
+            f"--host={params['host']}",
+            f"--port={params['port']}",
+            f"--username={params['user']}",
+            params["dbname"],
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    digest = hashlib.sha256(proc.stdout).hexdigest()[:16]
+    manifest = {
+        "manifest_version": MANIFEST_VERSION,
+        "format": "pg_dump-custom",
+        "schema_head": head,
+        "schema_head_checksum": head_checksum,
+        "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "dump_digest": digest,
+    }
+    dump_tmp = dest.with_name(f".{dest.name}.tmp-{uuid.uuid4().hex[:8]}")
+    manifest_tmp = dest.with_name(f".{dest.name}.manifest.tmp-{uuid.uuid4().hex[:8]}")
+    try:
+        fd = os.open(dump_tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(proc.stdout)
+                fh.flush()
+                os.fsync(fh.fileno())
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        _atomic_write_0600(manifest_tmp, json.dumps(manifest, sort_keys=True))
+        os.rename(dump_tmp, dest)
+        os.rename(manifest_tmp, dest.with_suffix(dest.suffix + ".manifest.json"))
+    except Exception:
+        try:
+            os.unlink(dump_tmp)
+        except FileNotFoundError:
+            pass
+        try:
+            os.unlink(manifest_tmp)
+        except FileNotFoundError:
+            pass
+        raise
+    return {
+        "ok": True,
+        "path": str(dest),
+        "manifest_path": str(dest.with_suffix(dest.suffix + ".manifest.json")),
+        "schema_head": head,
+        "digest": digest,
+    }
+
+
+def _verify_manifest(manifest_path: pathlib.Path, dump_path: pathlib.Path) -> dict[str, Any]:
+    """Validate manifest presence + digest; reject corrupt/mismatched input."""
+    if not manifest_path.is_file():
+        raise MigrationError("manifest_missing", f"backup manifest missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MigrationError("manifest_corrupt", f"backup manifest unreadable: {exc}") from exc
+    if manifest.get("manifest_version") != MANIFEST_VERSION:
+        raise MigrationError("manifest_version_unsupported", "unsupported backup manifest version")
+    if not dump_path.is_file():
+        raise MigrationError("backup_missing", f"backup dump missing: {dump_path}")
+    digest = hashlib.sha256(dump_path.read_bytes()).hexdigest()[:16]
+    if manifest.get("dump_digest") != digest:
+        raise MigrationError("manifest_digest_mismatch", "backup digest does not match manifest")
+    return manifest
+
+
+def restore(
+    conn,
+    src: pathlib.Path,
+    *,
+    target_name: str,
+    marker: str,
+    migrations_dir: pathlib.Path | None = None,
+    pg_restore: str = "pg_restore",
+) -> dict[str, Any]:
+    """Restore a backup into a freshly created, random-marker staging DB.
+
+    Refuses to restore into the current/any existing database.  Creates a new
+    empty target with ``target_name``, sets a random ``marker`` in
+    ``shiyi_restore_guard``, runs argv-only ``pg_restore``, then migrates and
+    verifies health.  Returns the staging DSN for the user to switch to.
+    Cleanup only ever drops the staging database this call created.
+    """
+    manifest = _verify_manifest(src.with_suffix(src.suffix + ".manifest.json"), src)
+
+    # Create a fresh staging database with a random marker.
+    env = dict(os.environ)
+    env["PGPASSWORD"] = _pgpassword(conn)
+    admin = _connection_dsn_params(conn)
+    staging_db = target_name
+    _run_argv(
+        [
+            "createdb",
+            f"--host={admin['host']}",
+            f"--port={admin['port']}",
+            f"--username={admin['user']}",
+            staging_db,
+        ],
+        env,
+    )
+    pw = _pgpassword(conn)
+    staging_dsn_internal = (
+        f"postgresql://{admin['user']}:{pw}@{admin['host']}:{admin['port']}/{staging_db}"
+    )
+    try:
+        import psycopg2
+
+        staging_conn = psycopg2.connect(staging_dsn_internal)
+        try:
+            with staging_conn.cursor() as cur:
+                cur.execute("CREATE TABLE shiyi_restore_guard (marker text PRIMARY KEY)")
+                cur.execute("INSERT INTO shiyi_restore_guard(marker) VALUES (%s)", (marker,))
+            staging_conn.commit()
+        finally:
+            staging_conn.close()
+
+        _run_argv(
+            [
+                pg_restore,
+                "--no-owner",
+                "--no-privileges",
+                f"--host={admin['host']}",
+                f"--port={admin['port']}",
+                f"--username={admin['user']}",
+                "--dbname", staging_db,
+                str(src),
+            ],
+            env,
+        )
+
+        if migrations_dir:
+            staging_conn = psycopg2.connect(staging_dsn_internal)
+            try:
+                migrate(staging_conn, migrations_dir=migrations_dir)
+                health = repository_health(staging_conn, migrations_dir=migrations_dir)
+            finally:
+                staging_conn.close()
+            if not health["ok"] or health["state"] != "current":
+                raise MigrationError(
+                    "restore_verification_failed",
+                    f"restored staging database not healthy: {health['state']}",
+                )
+        # Return a password-free DSN so the caller can switch to the new DB
+        # without ever printing credentials.
+        staging_dsn = (
+            f"postgresql://{admin['user']}@{admin['host']}:{admin['port']}/{staging_db}"
+        )
+        return {
+            "ok": True,
+            "staging_dsn": staging_dsn,
+            "marker": marker,
+            "schema_head": manifest.get("schema_head"),
+        }
+    except Exception:
+        # Only drop the staging DB this call created.
+        _run_argv(
+            ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",
+             f"--username={admin['user']}", staging_db],
+            env,
+        )
+        raise

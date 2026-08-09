@@ -98,10 +98,16 @@ psql -h 127.0.0.1 -p 5433 -U <user> -d <db> -f schema.sql   # legacy bootstrap
 Schema is managed by **forward-only migrations** (`shiyi/schema_migrations/`,
 recorded in `shiyi_schema_migrations`). Run `shiyi db migrate` on a fresh or
 existing database; it applies only unapplied migrations, each in its own
-transaction. `shiyi db health` reports repository version/table/extension
-status, and `shiyi db backup <path>` / `shiyi db restore <path>` provide the
-transactional backup/restore contract. `schema.sql` remains the legacy
-one-shot bootstrap reference and does not repair drift on existing databases.
+transaction and serialized by a PostgreSQL advisory lock. `shiyi db health`
+reports repository version/table/extension status and distinguishes
+`uninitialized / partial / current / drifted / ahead`; a database ahead of the
+code head rejects writes. `shiyi db backup <path>` writes a pg_dump file (with
+a sidecar manifest+digest) via 0600 temp + atomic rename and refuses overwrite
+or symlink targets. `shiyi db restore <src> --target <newdb> --marker <m>`
+restores into a freshly created, random-marker staging database only — it never
+overwrites the current database and returns a password-free DSN for you to
+switch to. `schema.sql` remains the legacy one-shot bootstrap reference and
+does not repair drift on existing databases.
 
 The credential file is explicit `key=value` data with `dbname`, `user`, and
 `password` entries. `deploy/run.sh` never prints its contents and does not

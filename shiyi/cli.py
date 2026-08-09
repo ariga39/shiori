@@ -46,10 +46,12 @@ def _build_parser() -> argparse.ArgumentParser:
     db_sub = db.add_subparsers(dest="db_command", required=True)
     db_sub.add_parser("migrate", help="apply forward-only migrations")
     db_sub.add_parser("health", help="repository health/version check")
-    backup = db_sub.add_parser("backup", help="export repository to a JSON backup")
-    backup.add_argument("dest", help="backup JSON path")
-    restore = db_sub.add_parser("restore", help="restore repository from a JSON backup")
-    restore.add_argument("src", help="backup JSON path")
+    backup = db_sub.add_parser("backup", help="backup repository to a pg_dump file")
+    backup.add_argument("dest", help="backup path (must not exist)")
+    restore = db_sub.add_parser("restore", help="restore a backup into a NEW staging database")
+    restore.add_argument("src", help="backup path")
+    restore.add_argument("--target", required=True, help="new staging database name (must not exist)")
+    restore.add_argument("--marker", required=True, help="random marker bound to this restore")
     return parser
 
 
@@ -139,7 +141,7 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
 
     from .config import credentials_from_settings
     from .migrations import MigrationError, migrate, schema_version
-    from .repository import backup_to_json, repository_health, restore_from_json
+    from .repository import backup, repository_health, restore
 
     creds = credentials_from_settings(settings)
     dsn = creds["dsn"]
@@ -157,12 +159,24 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
             print(_json.dumps({"applied": applied, "version": schema_version(conn)}, sort_keys=True))
             return 0
         if args.db_command == "backup":
-            result = backup_to_json(conn, Path(args.dest))
-            print(_json.dumps(result, sort_keys=True))
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            result = backup(conn, Path(args.dest), migrations_dir=migrations_dir)
+            print(_json.dumps({"ok": result["ok"], "path": result["path"],
+                               "manifest_path": result["manifest_path"],
+                               "schema_head": result["schema_head"], "digest": result["digest"]},
+                              sort_keys=True))
             return 0
         if args.db_command == "restore":
-            result = restore_from_json(conn, Path(args.src))
-            print(_json.dumps(result, sort_keys=True))
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            result = restore(conn, Path(args.src), target_name=args.target, marker=args.marker,
+                             migrations_dir=migrations_dir)
+            print(_json.dumps({"ok": result["ok"], "staging_dsn": result["staging_dsn"],
+                               "marker": result["marker"], "schema_head": result["schema_head"]},
+                              sort_keys=True))
             return 0
         print("error[unknown_db_command]", file=sys.stderr)
         return 2
