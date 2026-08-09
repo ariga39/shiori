@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+venv.bak*/
+.env
+
+# 日志
+*.log
+/tmp/
+
+# 数据库文件（防止误提交）
+*.db
+*.sqlite
+*.sqlite3
+.deleted.*
+
+# 凭据（防止误提交）
+*.key
+*credentials*
+publish-task.md
