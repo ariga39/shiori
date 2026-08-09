@@ -252,7 +252,10 @@ CHUNK_OVERLAP = 80     # 相邻块重叠
 
 ## 5. 查询设计
 
-`query.py` 的 `search(query, limit)`（`query.py:104`）执行完整混合检索流程。
+`query.py` 的 `search(query, limit, offset)` 与 `search_page(query, limit, offset)`
+执行完整混合检索流程。查询文本、页大小、offset、候选集都有硬上限；结果
+按稳定的 score/id 顺序返回，`search_page` 用一个 look-ahead 行返回
+`has_more`/`next_offset`，不执行无界 count 查询。
 
 ### 5.1 流程总览
 
@@ -261,7 +264,8 @@ CHUNK_OVERLAP = 80     # 相邻块重叠
   │
   ├─ ① 向量检索（pgvector 余弦）
   │      query_embedding = Voyage(query, input_type="query")   ── 查询端嵌入
-  │      SELECT ... ORDER BY embedding <=> q LIMIT pool         （余弦距离）
+  │      SELECT ... WHERE model/dimension compatible
+  │             ORDER BY embedding <=> q LIMIT pool              （余弦距离）
   │
   ├─ ② 关键词检索（tsvector BM25 风格）
   │      tsq = "词1 & 词2 & ..."（按空格 & 连接）
@@ -276,14 +280,18 @@ CHUNK_OVERLAP = 80     # 相邻块重叠
   │
   ├─ ⑤ 排序 → MMR 去重（余弦 > 0.85 则跳过）
   │
-  └─ 返回 top-K（content, score, ts, session_id, source_type）
+  └─ 返回 top-K（content, score, ts, session_id, source_type,
+                  embedding_model, embedding_dimension）
 ```
 
 ### 5.2 ① 向量检索
 
-- 查询文本先经 Voyage 嵌入，**`input_type = "query"`**（区别于摄取的 `"document"`），输入截断到 8000 字符（`query.py:70`），超时 30s（`:73`）。
+- 查询文本先经 Voyage 嵌入，**`input_type = "query"`**（区别于摄取的 `"document"`），输入超过 8000 字符直接结构化拒绝，超时 30s。
+- provider 返回的向量必须是有限数值、恰好 1024 维；若响应声明了不同 model
+  或数据库行的 `embedding_model`/dimension 与当前配置不一致，结果 fail closed，
+  不把不同模型/维度混入同一页。
 - `embedding <=>` 为 pgvector 余弦距离，`1 - distance` 得相似度 `vscore`（`query.py:133-134`）。
-- 候选池 `pool = max(limit*5, 30)`（`query.py:112`），即取足够多的候选供后续融合去重。
+- 候选池按请求页前缀计算为 `min(max((limit+offset)*5, 30), 1000)`，即取足够多的候选供后续融合去重，但不允许资源随请求无界增长。
 - 向量查询前会 `SET hnsw.ef_search = clamp(pool, 200, 1000)`（`query.py:124`），clamp 下限 200、上限 1000。HNSW 默认 `ef_search=40` 在表增长到数万行时召回率不足，会静默漏掉相关块——此项最多取回 `ef_search=1000` 个候选（pgvector 参数上限，**NB-C6-01**：`pool>1000`（即 `limit>200`）时召回有上限，候选池不随 pool 无上限增长）。**2026-08-03 起容器已配置 `shared_preload_libraries='vector'`**（见 §6.1），GUC 在启动时注册：合法值直接生效，超范围（`> 1000`，即 `pool > 1000` / `limit > 200`）SET 会报 `InvalidParameterValue`。故查询端将值 **clamp 到 1000** 保证 SET 合法，召回不再回退打折；`except` 分支（B-C5-01 修复）仅作防御兜底。延迟不随 pool 无上限升高。
 
 ### 5.3 ② 关键词检索（tsvector / pg_trgm 回退）
@@ -392,7 +400,7 @@ score *= decay
 ### 7.2 未来改进建议
 
 1. **接入 `session_facts` 表**，从切块中抽取结构化事实/实体，支持「事实问答」，与 `session_chunks` 关联（表已存在于 live 库，见 §3.3，尚无源码引用）。
-2. **服务化 / MCP server**：把 `query.py` 封装为 HTTP 服务或 MCP tool，供 agent 运行时内嵌调用，避免每次起进程、连库、调 Voyage。**已实现（2026-08-03）**：`mcp_server.py` 暴露只读 `search` 工具（query + limit，上限 20），通过 stdio transport 运行。
+2. **服务化 / MCP server**：把 `query.py` 封装为 HTTP 服务或 MCP tool，供 agent 运行时内嵌调用，避免每次起进程、连库、调 Voyage。**已实现（2026-08-09）**：`mcp_server.py` 仅暴露只读 `search` 工具（query + bounded limit/offset，上限 20），返回 `has_more`/`next_offset` 与稳定 provenance，通过 stdio transport 运行；错误码不回显 DSN、凭据或后端异常文本。
 3. **提供 `schema.sql` 迁移脚本**并纳入 CI，锁定表结构、索引（HNSW/IVFFlat 向量索引、GIN tsvector 索引）与扩展启用。
 4. **MMR 向量化**：把候选嵌入一次性读入（或交给 pgvector 内置运算），避免逐条解析字符串。
 5. **数据库连接池**（如 `psycopg2.pool` / PgBouncer）降低连接开销。

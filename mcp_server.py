@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """MCP stdio server exposing session-memory query.search as a read-only tool.
 
-Exposes a single tool `search(query, limit=5)` that runs the hybrid retrieval
-in query.search() and returns structured results. This layer is strictly
-read-only: no ingest/write tools are registered.
+Exposes a single tool `search(query, limit=5, offset=0)` that runs the hybrid
+retrieval in query.search() and returns bounded, provenance-bearing results.
+This layer is strictly read-only: no ingest/write tools are registered.
 
 Run with:  ./venv/bin/python mcp_server.py
 """
@@ -18,15 +18,17 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ContentBlock
 
 import query
-from shiyi.config import Settings, load_config
+from shiyi.config import ConfigError, Settings, load_config
 
 MAX_LIMIT = 20
 DEFAULT_LIMIT = 5
 
 TOOL_DESCRIPTION = (
     "Search session memory (hybrid vector + BM25 retrieval). "
-    "Returns up to `limit` (default 5, max 20) results, each with "
-    "content, score, timestamp, session_id, and source_type. Read-only."
+    "Returns a bounded page (limit default 5, max 20; offset is bounded) with "
+    "has_more/next_offset and content, score, timestamp, session_id, "
+    "source_type, model/dimension, and provenance. Incompatible embedding "
+    "models/dimensions are excluded. Read-only; no writes are exposed."
 )
 
 
@@ -36,38 +38,79 @@ def _serialize_ts(value):
     return value
 
 
-def run_search(query_text, limit=DEFAULT_LIMIT):
+def _public_error(exc: Exception) -> dict[str, str]:
+    """Map failures to a stable, non-sensitive MCP response."""
+    if isinstance(exc, (query.QueryError, ConfigError)):
+        return {"code": exc.code}
+    return {"code": "search_failed", "type": type(exc).__name__}
+
+
+def _invalid_input(code: str) -> dict[str, dict[str, str]]:
+    return {"error": {"code": code}}
+
+
+def run_search(query_text, limit=DEFAULT_LIMIT, offset=0):
     """Run a search, returning a JSON-serializable dict.
 
     On any error (empty query, embedding failure, DB unreachable) returns
     a stable, secret-safe error object. Exception text is deliberately omitted
     because database/client errors can contain DSNs or credentials.
     """
-    if not query_text or not query_text.strip():
-        return {"error": "query must be a non-empty string"}
+    if not isinstance(query_text, str):
+        return _invalid_input("invalid_query")
+    if not query_text.strip():
+        return _invalid_input("invalid_query")
+    try:
+        query_text = query._validate_query_text(query_text)
+    except query.QueryError as exc:
+        return {"error": {"code": exc.code}}
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        return _invalid_input("invalid_limit")
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        return _invalid_input("invalid_offset")
+    if offset < 0 or offset > query.MAX_OFFSET:
+        return _invalid_input("offset_out_of_bounds")
 
-    clamped = max(1, min(int(limit), MAX_LIMIT))
+    # Clamp oversized pages at the MCP boundary.  This keeps compatibility
+    # with existing callers while guaranteeing a bounded provider/DB request.
+    clamped = min(limit, MAX_LIMIT)
 
     try:
-        rows = query.search(query_text, limit=clamped)
+        page = query.search_page(query_text, limit=clamped, offset=offset)
+        results = [
+            _serialize_result(row)
+            for row in page.results
+        ]
     except Exception as exc:  # noqa: BLE001 - map failures to a safe public result
-        return {"error": {"code": "search_failed", "type": type(exc).__name__}}
+        return {"error": _public_error(exc)}
 
-    results = [
-        {
-            "content": row[0],
-            "score": row[1],
-            "timestamp": _serialize_ts(row[2]),
-            "session_id": row[3],
-            "source_type": row[4],
-        }
-        for row in rows
-    ]
-    return {"results": results, "count": len(results)}
+    return {
+        "results": results,
+        "count": len(results),
+        "limit": page.limit,
+        "offset": page.offset,
+        "has_more": page.has_more,
+        "next_offset": page.next_offset,
+    }
 
 
-async def _search_tool(query: str, limit: int = DEFAULT_LIMIT) -> dict:
-    return run_search(query, limit)
+def _serialize_result(row: tuple) -> dict:
+    provenance = query._row_provenance(row)
+    provenance["timestamp"] = _serialize_ts(provenance["timestamp"])
+    return {
+        "content": row[0],
+        "score": row[1],
+        "timestamp": provenance["timestamp"],
+        "session_id": provenance["session_id"],
+        "source_type": provenance["source_type"],
+        "embedding_model": provenance["embedding_model"],
+        "embedding_dimension": provenance["embedding_dimension"],
+        "provenance": provenance,
+    }
+
+
+async def _search_tool(query: str, limit: int = DEFAULT_LIMIT, offset: int = 0) -> dict:
+    return run_search(query, limit, offset)
 
 
 class ShiyiMCPServer(FastMCP):
