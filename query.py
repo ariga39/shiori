@@ -345,7 +345,7 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
         # below still runs.
         conn.rollback()
 
-    # ── Vector search ────────────────────────────────────────────────────
+    # Vector search ---------------------------------------------------------
     try:
         cur.execute("""
             SELECT id, content, 1 - (embedding <=> %s::vector) as vscore,
@@ -365,7 +365,7 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
         conn.close()
         raise QueryError("search backend is unavailable", code="search_unavailable") from exc
 
-    # ── BM25 (tsvector) search ───────────────────────────────────────────
+    # BM25 (tsvector) search -----------------------------------------------
     tsq = _build_tsquery(query)
     bm25_rows = []
     if tsq:
@@ -388,11 +388,11 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
             # below still runs on a usable connection.
             conn.rollback()
 
-    # ── Exact substring (ILIKE) search ───────────────────────────────────
-    # Short queries — especially 2-4 char CJK names like 「日和」 — score
+    # Exact substring (ILIKE) search ---------------------------------------
+    # Short queries, especially two-to-four-character CJK names, score
     # terribly under both vector (semantic neighbors crowd them out of the
     # small pool) and BM25 (tsquery splits CJK into single chars joined by
-    # AND: '日' & '和', both high-frequency, so ts_rank is diluted to noise).
+    # AND: each character is high-frequency, so ts_rank is diluted to noise).
     # pg_trgm similarity is useless for 2-char strings (only 1 trigram).
     # Exact substring match is the reliable channel for entity/name queries:
     # it finds the chunks that literally contain the query.  We add it as a
@@ -439,7 +439,7 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
     cur.close()
     conn.close()
 
-    # ── RRF fusion ───────────────────────────────────────────────────────
+    # RRF fusion -----------------------------------------------------------
     k = 60  # RRF constant
     scores = {}   # id -> rrf_score
     meta = {}     # id -> (content, timestamp, session_id, source_type, embedding_str, created_at, model, dim)
@@ -457,7 +457,8 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
 
     # Exact-substring hits get a rank bonus so entity/name matches are not
     # buried: they are treated as if they ranked at position 1 in their own
-    # channel (1/(k+1) ≈ 0.0164) plus the fact that BM25/vector may also hit.
+    # channel (1/(k+1), approximately 0.0164) plus the fact that BM25/vector
+    # may also hit.
     # This deliberately favors literal containment for short queries.
     for rank, row in enumerate(exact_rows, 1):
         rid, content, tscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
@@ -466,7 +467,7 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
         if rid not in meta:
             meta[rid] = (content, ts, sid, stype, emb_str, created_at, model, dimension)
 
-    # ── Temporal decay ───────────────────────────────────────────────────
+    # Temporal decay --------------------------------------------------------
     for rid in scores:
         content, ts, sid, stype, emb_str, created_at, model, dimension = meta[rid]
         eff_ts = ts if ts is not None else created_at
@@ -479,10 +480,10 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
             # (which would rank it as brand-new); apply a fixed low prior.
             scores[rid] *= NULL_TS_PRIOR
 
-    # ── Sort by decayed RRF score ────────────────────────────────────────
+    # Sort by decayed RRF score --------------------------------------------
     ranked = sorted(scores.keys(), key=lambda rid: (-scores[rid], str(rid)))
 
-    # ── MMR deduplication ────────────────────────────────────────────────
+    # MMR deduplication -----------------------------------------------------
     selected = []
     selected_embeddings = []
 
