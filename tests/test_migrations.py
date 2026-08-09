@@ -233,19 +233,23 @@ def test_restore_corrupt_manifest_fails_closed(conn, tmp_path: pathlib.Path):
 
 
 def test_0001_equivalent_to_schema_sql(conn):
-    """Structural equivalence between migration 0001 and legacy schema.sql."""
-    from shiyi.schema_migrations import _structural_tables
+    """Structural equivalence (tables, columns, indexes, extensions) between
+    migration 0001 and legacy schema.sql."""
+    from shiyi.schema_migrations import legacy_schema_summary, migrated_db_summary
 
     _reset_schema(conn)
     migrate(conn, migrations_dir=MIGRATIONS_DIR)
-    expected = _structural_tables()
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' "
-            "AND table_name IN ('session_chunks','ingestion_state','session_facts')"
-        )
-        present = {row[0] for row in cur.fetchall()}
-    assert present == set(expected)
+    expected = legacy_schema_summary()
+    actual = migrated_db_summary(conn)
+
+    assert set(actual["tables"]) == set(expected["tables"])
+    for table in expected["tables"]:
+        # The migration keeps the canonical column order; compare as sets so a
+        # column addition/removal is caught without depending on DDL order.
+        assert set(actual["tables"][table]) == set(expected["tables"][table])
+    # Indexes: every legacy index must exist (the migration may add none).
+    assert set(expected["indexes"]) <= set(actual["indexes"])
+    assert set(expected["extensions"]) <= set(actual["extensions"])
 
 
 def test_restore_refuses_nonempty_target(conn, tmp_path: pathlib.Path):
@@ -287,7 +291,8 @@ def test_restore_verification_failure_cleans_only_staging(conn, tmp_path: pathli
     # verify a bad digest is rejected before any DB is created).
     dest.with_suffix(dest.suffix + ".manifest.json").write_text(
         json.dumps({"manifest_version": "1", "format": "pg_dump-custom",
-                    "schema_head": 1, "created_at": "x", "dump_digest": "deadbeef"}),
+                    "schema_head": 1, "schema_head_checksum": "deadbeef",
+                    "created_at": "x", "dump_digest": "deadbeef"}),
         encoding="utf-8",
     )
     with pytest.raises(MigrationError) as exc:
@@ -297,3 +302,84 @@ def test_restore_verification_failure_cleans_only_staging(conn, tmp_path: pathli
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM pg_database WHERE datname='shiyi_never_created'")
         assert cur.fetchone() is None
+
+
+def test_backup_refuses_symlink_directory_component(conn, tmp_path: pathlib.Path):
+    """A symlink parent component must be rejected even when the leaf is new."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "linkdir"
+    link.symlink_to(real)
+    dest = link / "new.dump"
+    with pytest.raises(MigrationError) as exc:
+        backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    assert exc.value.code == "backup_path_symlink"
+
+
+def test_backup_refuses_dangling_symlink(conn, tmp_path: pathlib.Path):
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dangling = tmp_path / "dangling.dump"
+    dangling.symlink_to(tmp_path / "nonexistent")
+    with pytest.raises(MigrationError) as exc:
+        backup(conn, dangling, migrations_dir=MIGRATIONS_DIR)
+    assert exc.value.code == "backup_target_exists" or exc.value.code == "backup_path_symlink"
+
+
+def test_restore_manifest_missing_field_rejected(conn, tmp_path: pathlib.Path):
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "mf.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    import hashlib
+
+    digest = hashlib.sha256(dest.read_bytes()).hexdigest()[:16]
+    # Manifest missing schema_head_checksum -> must be rejected.
+    dest.with_suffix(dest.suffix + ".manifest.json").write_text(
+        json.dumps({"manifest_version": "1", "format": "pg_dump-custom",
+                    "schema_head": 1, "created_at": "x", "dump_digest": digest}),
+        encoding="utf-8",
+    )
+    with pytest.raises(MigrationError) as exc:
+        restore(conn, dest, target_name="shiyi_mf_x", marker="m-mf")
+    assert exc.value.code == "manifest_incomplete"
+
+
+def test_restore_schema_head_mismatch_rejected(conn, tmp_path: pathlib.Path):
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "shm.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    import hashlib
+
+    digest = hashlib.sha256(dest.read_bytes()).hexdigest()[:16]
+    manifest_path = dest.with_suffix(dest.suffix + ".manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["schema_head"] = 999  # ahead of code head
+    manifest["dump_digest"] = digest
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(MigrationError) as exc:
+        restore(conn, dest, target_name="shiyi_shm_x", marker="m-shm", migrations_dir=MIGRATIONS_DIR)
+    assert exc.value.code == "manifest_schema_mismatch"
+
+
+def test_restore_generates_marker_when_omitted(conn, tmp_path: pathlib.Path):
+    """When marker is omitted, restore generates one and returns it."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO session_chunks (session_id, source_type, content, embedding_model) "
+            "VALUES ('g', 'main_user', 'gm', 'm')"
+        )
+    conn.commit()
+    dest = tmp_path / "gm.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    staging = f"shiyi_genmarker_{os.getpid()}"
+    result = restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
+    assert result["marker"]  # generated, non-empty
+    assert result["marker"].startswith("restore-")
+    subprocess.run(
+        ["dropdb", "--host=127.0.0.1", "--port=5432", "--username=shiyi_ci", staging],
+        env={**os.environ, "PGPASSWORD": "shiyi-ci-only"}, check=True,
+    )

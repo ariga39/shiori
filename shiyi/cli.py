@@ -148,7 +148,10 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
     conn = psycopg2.connect(dsn)
     try:
         if args.db_command == "health":
-            health = repository_health(conn)
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            health = repository_health(conn, migrations_dir=migrations_dir)
             print(_json.dumps(health, sort_keys=True, default=str))
             return 0 if health["ok"] else 2
         if args.db_command == "migrate":

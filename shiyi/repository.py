@@ -91,6 +91,10 @@ def repository_health(conn, *, migrations_dir: pathlib.Path | None = None) -> di
         state = "drifted"
     elif version == 0:
         state = "uninitialized"
+    elif missing or missing_ext:
+        # Tables/extensions expected for the applied version are absent: this
+        # is not a clean "current" state, so writes must fail closed.
+        state = "partial"
     elif version < head:
         state = "partial"
     else:
@@ -154,19 +158,27 @@ def _pgpassword(conn) -> str:
 
 
 def _safe_output_path(dest: pathlib.Path) -> None:
-    """Reject overwrite, symlink targets, and symlink path components."""
-    if dest.exists():
+    """Reject overwrite, symlink targets, dangling symlinks, and symlink
+    directory components."""
+    if dest.exists() or dest.is_symlink():
         raise MigrationError("backup_target_exists", f"backup target already exists: {dest}")
-    cursor = dest.resolve(strict=False)
-    if cursor.is_symlink():
-        raise MigrationError("backup_target_symlink", "backup target must not be a symlink")
-    parent = cursor.parent
-    while True:
-        if parent.is_symlink():
-            raise MigrationError("backup_path_symlink", "backup path traverses a symlink")
-        if parent == parent.parent:
-            break
-        parent = parent.parent
+    # Reject any symlink in the path's existing components (including a
+    # dangling symlink that lstat sees but stat would miss).
+    cursor = dest.parent
+    parts = []
+    while cursor != cursor.parent:
+        parts.append(cursor)
+        cursor = cursor.parent
+    for component in reversed(parts):
+        if component.is_symlink():
+            raise MigrationError("backup_path_symlink", f"backup path traverses a symlink: {component}")
+    parent = dest.parent
+    if not parent.exists():
+        # Destination's parent must already exist; refuse to create through a
+        # possibly-symlinked intermediate.
+        if not parent.is_dir() and parent.is_symlink():
+            raise MigrationError("backup_path_symlink", "backup parent is a symlink")
+        raise MigrationError("backup_parent_missing", f"backup parent does not exist: {parent}")
 
 
 def _run_argv(cmd: list[str], env: dict[str, str]) -> None:
@@ -262,7 +274,16 @@ def backup(
                 pass
         _atomic_write_0600(manifest_tmp, json.dumps(manifest, sort_keys=True))
         os.rename(dump_tmp, dest)
-        os.rename(manifest_tmp, dest.with_suffix(dest.suffix + ".manifest.json"))
+        try:
+            os.rename(manifest_tmp, dest.with_suffix(dest.suffix + ".manifest.json"))
+        except Exception:
+            # Manifest commit failed: remove the dump so no partial backup set
+            # (dump without manifest) is left behind.
+            try:
+                os.unlink(dest)
+            except FileNotFoundError:
+                pass
+            raise
     except Exception:
         try:
             os.unlink(dump_tmp)
@@ -283,15 +304,31 @@ def backup(
 
 
 def _verify_manifest(manifest_path: pathlib.Path, dump_path: pathlib.Path) -> dict[str, Any]:
-    """Validate manifest presence + digest; reject corrupt/mismatched input."""
+    """Validate manifest presence, all required fields, and digest."""
     if not manifest_path.is_file():
         raise MigrationError("manifest_missing", f"backup manifest missing: {manifest_path}")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise MigrationError("manifest_corrupt", f"backup manifest unreadable: {exc}") from exc
+    required = {
+        "manifest_version",
+        "format",
+        "schema_head",
+        "schema_head_checksum",
+        "created_at",
+        "dump_digest",
+    }
+    missing_fields = sorted(required - set(manifest))
     if manifest.get("manifest_version") != MANIFEST_VERSION:
         raise MigrationError("manifest_version_unsupported", "unsupported backup manifest version")
+    if missing_fields:
+        raise MigrationError(
+            "manifest_incomplete",
+            f"backup manifest missing fields: {missing_fields}",
+        )
+    if manifest.get("format") != "pg_dump-custom":
+        raise MigrationError("manifest_format_unsupported", "unsupported backup format")
     if not dump_path.is_file():
         raise MigrationError("backup_missing", f"backup dump missing: {dump_path}")
     digest = hashlib.sha256(dump_path.read_bytes()).hexdigest()[:16]
@@ -305,21 +342,43 @@ def restore(
     src: pathlib.Path,
     *,
     target_name: str,
-    marker: str,
+    marker: str | None = None,
     migrations_dir: pathlib.Path | None = None,
     pg_restore: str = "pg_restore",
 ) -> dict[str, Any]:
     """Restore a backup into a freshly created, random-marker staging DB.
 
     Refuses to restore into the current/any existing database.  Creates a new
-    empty target with ``target_name``, sets a random ``marker`` in
+    empty target with ``target_name``, binds a generated random ``marker`` in
     ``shiyi_restore_guard``, runs argv-only ``pg_restore``, then migrates and
-    verifies health.  Returns the staging DSN for the user to switch to.
-    Cleanup only ever drops the staging database this call created.
+    verifies health.  The manifest schema head/checksum must match the current
+    code head.  Returns the staging DSN for the user to switch to.  Cleanup
+    only ever drops the staging database this call created (identity re-verified
+    by marker before any drop).
     """
     manifest = _verify_manifest(src.with_suffix(src.suffix + ".manifest.json"), src)
+    if migrations_dir:
+        head = code_head(migrations_dir)
+        if manifest.get("schema_head") != head:
+            raise MigrationError(
+                "manifest_schema_mismatch",
+                f"backup schema head {manifest.get('schema_head')} does not match code head {head}",
+            )
+        if head > 0:
+            names = sorted(available_migrations(migrations_dir).items())
+            if names:
+                _, (_name, path) = names[-1]
+                head_checksum = _checksum(path.read_text(encoding="utf-8"))
+                if manifest.get("schema_head_checksum") != head_checksum:
+                    raise MigrationError(
+                        "manifest_schema_checksum_mismatch",
+                        "backup schema head checksum does not match code head",
+                    )
 
-    # Create a fresh staging database with a random marker.
+    if marker is None or marker == "":
+        marker = f"restore-{uuid.uuid4().hex}"
+
+    # Create a fresh staging database.
     env = dict(os.environ)
     env["PGPASSWORD"] = _pgpassword(conn)
     admin = _connection_dsn_params(conn)
@@ -388,10 +447,24 @@ def restore(
             "schema_head": manifest.get("schema_head"),
         }
     except Exception:
-        # Only drop the staging DB this call created.
-        _run_argv(
-            ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",
-             f"--username={admin['user']}", staging_db],
-            env,
-        )
+        # Only drop the staging DB this call created: re-verify the marker
+        # identity first so a replaced/foreign DB is never dropped.
+        try:
+            import psycopg2 as _pg2
+
+            check = _pg2.connect(staging_dsn_internal)
+            try:
+                with check.cursor() as cur:
+                    cur.execute("SELECT marker FROM shiyi_restore_guard")
+                    row = cur.fetchone()
+            finally:
+                check.close()
+            if row is not None and row[0] == marker:
+                _run_argv(
+                    ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",
+                     f"--username={admin['user']}", staging_db],
+                    env,
+                )
+        except Exception:
+            pass
         raise
