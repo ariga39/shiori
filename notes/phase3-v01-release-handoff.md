@@ -10,10 +10,12 @@ this task.
 - Base/current main at task start: `c0e22f499602ca4331444a85e70e69faba9890af`.
 - Implementation commit before this handoff-only change:
   `3b6224298b4cb1d7c1bc502045278315f259f46c`.
-- Final candidate is the single append-only successor containing this file;
-  its complete SHA, branch, Draft PR, and hosted run IDs are supplied by the
-  publication message because a commit cannot safely self-reference its own
-  object ID.
+- The current candidate is the append-only tip after this handoff and the
+  narrow hosted-driven pgvector guard successors; its complete SHA, branch,
+  Draft PR, and hosted run IDs are supplied by the publication message because
+  a commit cannot safely self-reference its own object ID. Earlier tips are
+  historical parents, not acceptance objects, and their head-specific CI or
+  peer evidence must not be reused.
 - Branch: `phase3/v01-release-shizuka`.
 - Worktree: `/home/raft/shiyi-phase3-release-shizuka`.
 - The candidate must be checked for a clean worktree and exact ancestry before
@@ -42,6 +44,12 @@ can be registered as migration 0001 without replaying DDL. Partial, drifted,
 or ambiguous structures receive a structured error, write no migration ledger
 row, and do not mutate the schema. Forward migrations then run normally.
 
+The pgvector preload gate receives the GitHub Actions job-service container ID,
+requires exactly one matching container, reads its immutable image ID, and
+checks that image object's `RepoDigests` for the pinned digest before restart.
+Missing, empty, ambiguous, malformed, or mismatched identity data fails closed;
+the verifier is packaged and covered by script-level counterexamples.
+
 ## Evidence ledger
 
 The following statuses are deliberately separate; a local skip is not a green
@@ -49,7 +57,7 @@ release gate.
 
 | Gate | Local candidate evidence | Hosted requirement |
 | --- | --- | --- |
-| locked install, Ruff, Pyright, unit tests | local commands recorded in the thread; DB-dependent tests are classified below | terminal green |
+| locked install, Ruff, Pyright, unit tests | `152 passed, 101 skipped`; skips are explicit no-local-PostgreSQL classes; Ruff/Pyright/lock/compileall/diff-check clean | terminal green |
 | PostgreSQL/pgvector, client/server major parity, vector preload, isolated DB marker/identity | not available on the author workstation | real service, no required skips |
 | fresh `shiyi db migrate`/`db health` | command is wired into CI and clean-machine smoke | terminal green |
 | legacy schema adoption and partial/drift rejection | synthetic tests and `tools/legacy_schema_upgrade_smoke.sh` | terminal green |
