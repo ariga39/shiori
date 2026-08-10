@@ -1,12 +1,16 @@
-# Local development PostgreSQL + pgvector.
+# Local development PostgreSQL + pgvector. The service is built from the
+# repository Dockerfile so the runtime smoke and vulnerability scan exercise
+# the same immutable base and final image.
 # Credentials are supplied by deploy/run.sh from an explicitly selected file or
 # by POSTGRES_* environment variables. Nothing here reads a home-directory
 # fallback or names a shared/external volume.
 
 services:
   session-memory-pg:
-    image: pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
-    command: ["postgres", "-c", "shared_preload_libraries=vector"]
+    image: shiyi-pgvector:local
+    build:
+      context: ..
+      dockerfile: Dockerfile
     ports:
       - "127.0.0.1:${SHIYI_PG_PORT:-5433}:5432"
     volumes:

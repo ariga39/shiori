@@ -100,16 +100,25 @@ use the installed `shiyi` command.
 
 ## PostgreSQL + pgvector
 
-The local deployment uses the official pinned `pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38` image (pg17). It
+The local deployment builds the repository `Dockerfile`, whose `pgvector/pg17`
+base is pinned to
+`sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38`.
+Compose runs that same local image; it does not pull or publish an image and
 does not use an external or pre-named Docker volume. The default data directory
 is the project-local `.data/postgres` (ignored by Git), and both the port and
 data directory can be changed with `SHIYI_PG_PORT` and
 `SHIYI_PG_DATA_DIR`.
 
 ```bash
-SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d
+SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d --build
 shiyi db migrate        # apply forward-only migrations (recommended)
 ```
+
+The first `up` must include `--build` so the compose path exercises the pinned
+Dockerfile. The resulting container runs as the non-root `postgres` user,
+preloads `vector`, and keeps rows across a container restart. CI runs the same
+compose build/runtime smoke and scans that exact local image; it never pushes
+the image.
 
 Schema is managed by **forward-only migrations** (`shiyi/schema_migrations/`,
 recorded in `shiyi_schema_migrations`). Run `shiyi db migrate` on a fresh or

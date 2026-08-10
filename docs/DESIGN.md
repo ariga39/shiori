@@ -78,8 +78,8 @@
 | `ingest.py` | OpenClaw 会话摄取：解析 → 切块 → 嵌入 → 存储 | `main()`（`ingest.py:487`） |
 | `ingest_discord.py` | Discord 归档摄取：解析 → 切块 → 嵌入 → 存储 | `main()`（`ingest_discord.py:393`） |
 | `query.py` | 混合检索 + 时间衰减 + MMR 去重 | `search()`（`query.py:104`） |
-| `deploy/docker-compose.yml` + `deploy/run.sh` | **数据库部署主路径**：官方 `pgvector/pgvector:pg17` 镜像 + preload（见 §6.1） | `run.sh up` |
-| `Dockerfile` | **未采用（历史遗留）**：仓库自带镜像定义，live/compose 用官方镜像经 compose 部署，未引用它 | — |
+| `deploy/docker-compose.yml` + `deploy/run.sh` | **数据库部署主路径**：构建仓库 Dockerfile 的 pinned `pgvector/pg17` 镜像 + preload（见 §6.1） | `run.sh up -d --build` |
+| `Dockerfile` | **数据库镜像定义**：固定 pgvector 基础 digest，以非 root postgres 用户运行并通过 CMD preload vector | compose build |
 
 ---
 
@@ -346,12 +346,12 @@ score *= decay
 
 ### 6.1 数据库与 Docker
 
-- **容器重建剧本（`deploy/docker-compose.yml` + `deploy/run.sh`，Cycle 6 B-C6-01 固化）：** 官方 `pgvector/pgvector:pg17` 镜像 + 显式 `command: ["postgres", "-c", "shared_preload_libraries=vector"]`，数据卷 `session-memory-pgdata`（external，复用既有数据），端口 `127.0.0.1:5433:5432`，`restart: unless-stopped`。`POSTGRES_DB/USER/PASSWORD` 不硬编码明文，由 `deploy/run.sh` 从 `~/.openclaw/credentials/session-memory-pg.txt` 读取注入。重建命令：`./deploy/run.sh up`。
-- **`shared_preload_libraries='vector'` 必须配置（2026-08-03）：** pgvector 扩展默认惰性加载，`SET hnsw.ef_search` 若作为会话首个语句发出，扩展未加载时该 GUC 被当 custom placeholder 静默丢弃（不报错也不生效），`ef_search` 恒为默认 40。预加载后 GUC 启动即注册：合法值直接生效、超范围报错。**2026-08-03 重建事实：** 已用官方镜像 + `-c shared_preload_libraries=vector` 重建容器（验证：`SHOW shared_preload_libraries`=vector、`SET hnsw.ef_search=1001` 报 `InvalidParameterValue`、数据完整、扩展 pg_trgm/plpgsql/vector 保留）。**重建容器必须带该 preload**，否则 ef_search 优化失效——compose 的 `command` 已固化此要求（Dockerfile 为未采用的可选镜像定义，其 `CMD` 亦同，见 §2 模块表）。
-- **回滚（2026-08-03 更新，B-C7-01）：** 旧容器 `session-memory-pg-old` 已删除（其 `Cmd=[postgres]` **无 preload**，按字面回滚会撤销 preload 修复）。当前**回滚 = 用本剧本重建**：`./deploy/run.sh up`（compose `command` 自带 preload，数据卷 `session-memory-pgdata` 未动）。若确需用旧容器回滚，须先确认其带 `-c shared_preload_libraries=vector`（否则 ef_search 优化失效）。
+- **容器重建剧本（`deploy/docker-compose.yml` + `deploy/run.sh`）：** compose 从仓库 Dockerfile 构建 pinned `pgvector/pg17` 镜像，绑定项目本地数据目录，端口 `127.0.0.1:5433:5432`，`restart: unless-stopped`。`POSTGRES_DB/USER/PASSWORD` 不硬编码明文，由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或环境变量注入。首次启动命令：`SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d --build`。
+- **`shared_preload_libraries='vector'` 必须配置：** Dockerfile 的 CMD 在服务启动时预加载 vector，使 `hnsw.ef_search` GUC 在首个会话前注册；compose 不覆盖该 CMD。CI 的 runtime smoke 会检查 CMD、`SHOW shared_preload_libraries`、扩展写入、非 root uid 与重启后的数据。
+- **回滚：** 保留绑定数据目录并用当前 pinned Dockerfile 重建：`SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d --build`。不使用外部或预命名 volume，不回滚到缺少 vector preload 的旧容器。
 - 需在数据库中启用扩展：`pgvector`（`vector` 类型）、`pg_trgm`（query 回退用）。
 - 表结构的历史快照保留在仓库根 `schema.sql`（`session_chunks`、`ingestion_state`、扩展、索引），但运行时换库/重建统一执行 `shiyi db migrate`。完整、未登记的 legacy 结构会先做结构校验并登记初始 migration；部分或漂移结构拒绝升级。其中 `timestamp_start` / `timestamp_end` 为 **nullable**；主路径下时间戳解析失败会写入文件 mtime 兜底（`fallback_ts`），仅当 `fallback_ts=None` 时才存 `NULL`（见 §5.5）。
-- 连接信息由 `~/.openclaw/credentials/session-memory-pg.txt` 读取（`ingest.py:62`），格式为 `key=value`，含 `host` / `port` / `dbname` / `user` / `password`（`ingest.py:73-81`）。
+- 连接信息由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或 `POSTGRES_*` 环境变量注入，格式为 `key=value`，含 `dbname` / `user` / `password`；不会读取 home-directory fallback。
 - Voyage API key 位于 `~/.openclaw/credentials/voyage-api-key.txt`（`ingest.py:30`）。
 
 ### 6.2 凭据管理

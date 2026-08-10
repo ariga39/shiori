@@ -39,8 +39,11 @@ checklist.
       pinned `pip-audit` reports no unwaived high-severity vulnerability.
 - [ ] Reachable history, commit metadata, and built artifacts pass the
       offline secret/private-key/PII/host-path audit without exposing matches.
-- [ ] The pinned container builds and the HIGH/CRITICAL vulnerability scan
-      passes when the repository's container definition is retained.
+- [ ] The compose path builds the pinned Dockerfile image, and its runtime
+      smoke proves empty-volume initialization, readiness, vector extension
+      writes, restart persistence, non-root execution, preload/CMD behavior,
+      and job-owned teardown before the HIGH/CRITICAL scan runs on that same
+      image.
 
 ## Privacy and scope gates
 

@@ -7,6 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 AUDIT = ROOT / "tools" / "release_audit.py"
 DOCKERFILE = ROOT / "Dockerfile"
+COMPOSE = ROOT / "deploy" / "docker-compose.yml"
+RUNTIME_SMOKE = ROOT / "tools" / "container_runtime_smoke.sh"
 PGVECTOR_DIGEST = "sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38"
 
 
@@ -41,6 +43,24 @@ def test_ci_actions_and_container_are_pinned() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     assert "RUN rm -f /usr/local/bin/gosu" in dockerfile
     assert "USER postgres" in dockerfile
+    compose = COMPOSE.read_text(encoding="utf-8")
+    assert "build:" in compose
+    assert "dockerfile: Dockerfile" in compose
+    assert "image: shiyi-pgvector:local" in compose
+    assert "command:" not in compose
+    workflow_container = workflow[workflow.index("  container_scan:") :]
+    assert "docker build" not in workflow_container
+    assert "build --pull session-memory-pg" in workflow_container
+    assert "tools/container_runtime_smoke.sh --project" in workflow_container
+    assert "docker compose --file deploy/docker-compose.yml" in workflow_container
+    assert "docker image inspect shiyi-pgvector:local" in workflow_container
+    assert "image-ref: shiyi-pgvector:local" in workflow_container
+    runtime_smoke = RUNTIME_SMOKE.read_text(encoding="utf-8")
+    assert "--volumes --remove-orphans" in runtime_smoke
+    assert "CREATE EXTENSION IF NOT EXISTS vector" in runtime_smoke
+    assert "SELECT count(*) FROM shiyi_container_smoke" in runtime_smoke
+    assert "shared_preload_libraries=vector" in runtime_smoke
+    assert "id -u" in runtime_smoke
 
 
 def test_manifest_contains_runtime_release_references() -> None:
@@ -49,5 +69,6 @@ def test_manifest_contains_runtime_release_references() -> None:
     assert "include schema.sql" in manifest
     assert "include tools/legacy_schema_upgrade_smoke.sh" in manifest
     assert "include tools/verify_pgvector_image.sh" in manifest
+    assert "include tools/container_runtime_smoke.sh" in manifest
     assert "recursive-include docs *.md" in manifest
     assert "include THIRD_PARTY_NOTICES.md" in manifest

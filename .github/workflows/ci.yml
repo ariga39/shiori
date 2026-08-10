@@ -247,18 +247,68 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      POSTGRES_DB: shiyi_container_ci
+      POSTGRES_USER: shiyi_container
+      POSTGRES_PASSWORD: shiyi-ci-only
+      SHIYI_CONTAINER_PROJECT: shiyi-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      SHIYI_CONTAINER_ROOT: ${{ runner.temp }}/shiyi-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+      SHIYI_PG_DATA_DIR: ${{ runner.temp }}/shiyi-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}/data
+      SHIYI_PG_PORT: 55432
+      RUNNER_TEMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
         with:
           fetch-depth: 0
-      - name: Build pinned PostgreSQL image
-        run: docker build --pull --tag shiyi-release-candidate:ci .
-      - name: Scan built image for high or critical vulnerabilities
+
+      - name: Build compose image and record immutable identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --file deploy/docker-compose.yml \
+            --project-name "${SHIYI_CONTAINER_PROJECT}" build --pull session-memory-pg
+          image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}')"
+          if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "compose build did not produce an immutable image id" >&2
+            exit 1
+          fi
+          echo "SHIYI_BUILT_IMAGE_ID=${image_id}" >> "${GITHUB_ENV}"
+
+      - name: Run actual compose runtime smoke
+        shell: bash
+        run: tools/container_runtime_smoke.sh --project "${SHIYI_CONTAINER_PROJECT}" --skip-build
+
+      - name: Assert scan input is the built compose image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}')"
+          [[ "${image_id}" == "${SHIYI_BUILT_IMAGE_ID}" ]] || {
+            echo "scan input image changed after runtime smoke" >&2
+            exit 1
+          }
+
+      - name: Scan built compose image for high or critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: shiyi-release-candidate:ci
+          image-ref: shiyi-pgvector:local
           format: table
           vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '1'
+
+      - name: Verify scanned image identity and clean compose resources
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_id=""
+          if image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}' 2>/dev/null)"; then
+            if [[ -n "${SHIYI_BUILT_IMAGE_ID:-}" && "${image_id}" != "${SHIYI_BUILT_IMAGE_ID}" ]]; then
+              echo "scanned image identity changed" >&2
+              exit 1
+            fi
+          fi
+          docker compose --file deploy/docker-compose.yml \
+            --project-name "${SHIYI_CONTAINER_PROJECT}" down --volumes --remove-orphans

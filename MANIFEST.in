@@ -4,6 +4,7 @@ include tools/legacy_schema_upgrade_smoke.sh
 include tools/mcp_stdio_smoke.py
 include tools/release_audit.py
 include tools/verify_pgvector_image.sh
+include tools/container_runtime_smoke.sh
 include tools/check_licenses.py
 include schema.sql
 include THIRD_PARTY_NOTICES.md

@@ -50,6 +50,15 @@ checks that image object's `RepoDigests` for the pinned digest before restart.
 Missing, empty, ambiguous, malformed, or mismatched identity data fails closed;
 the verifier is packaged and covered by script-level counterexamples.
 
+The retained container delivery now has one runtime path: `deploy/docker-compose.yml`
+builds the pinned `Dockerfile` and runs its local `shiyi-pgvector:local` image;
+there is no optional-only image path. `tools/container_runtime_smoke.sh` uses a
+fresh job-owned bind directory and project name to verify empty-volume
+initialization, readiness, vector extension/write, restart persistence,
+non-root execution, inherited entrypoint/CMD and preload, and resource teardown.
+The container scan consumes the same compose-built image tag after its immutable
+image ID is recorded; the image is never pushed.
+
 ## Evidence ledger
 
 The following statuses are deliberately separate; a local skip is not a green
@@ -65,14 +74,14 @@ release gate.
 | MCP stdio tool-list/search | harness is packaged; local execution requires the isolated DB | terminal green |
 | license and locked dependency audit | `check_licenses.py`, locked export, and pinned `pip-audit` are wired | terminal green with no unwaived high/critical finding |
 | reachable history/commit metadata/artifact audit | offline `release_audit.py` is wired and emits counts/object prefixes only | terminal green on a non-shallow checkout |
-| pinned container build and HIGH/CRITICAL scan | Docker unavailable locally | terminal green against the built image |
+| compose-built container runtime smoke and HIGH/CRITICAL scan | Docker unavailable locally | terminal green against the same built image |
 
-At the current candidate tip, the local full suite is `153 passed, 101
-skipped`; the skips are explicit no-local-PostgreSQL classes. Ruff, Pyright,
-lock, compileall, and diff-check are clean. The local non-shallow release audit
-reports `32 reachable commits`, `328 reachable objects`, `6 refs`, `3
-artifacts`, and no blocking findings. These local results do not substitute for
-the hosted PostgreSQL, clean-install, MCP, and container gates.
+At the pre-successor offline verification, the local full suite was `153
+passed, 101 skipped`; the skips are explicit no-local-PostgreSQL classes. Ruff,
+Pyright, lock, compileall, and diff-check were clean. The exact successor's
+release-audit aggregate is recomputed after its append-only commit and reported
+with the publication message; these local results do not substitute for the
+hosted PostgreSQL, clean-install, MCP, runtime-container, and scan gates.
 
 At the last offline verification, the workstation had no PostgreSQL/pgvector
 service and no Docker. Those capabilities therefore remain unproven locally;
@@ -118,7 +127,10 @@ by construction as a fixed JSON summary with `raw_logs_uploaded=false`,
 `secret_matches=counts_only`, and one-day retention; successful runs upload no
 diagnostic artifact. No host `HOME`, ambient PostgreSQL password, user
 credential, private source path, or real document is used by the clean-machine
-harness.
+harness. The container smoke likewise uses only synthetic credentials, a
+runner-temporary project/data root, and compose labels for teardown; it refuses
+to reuse an existing root and fails if compose leaves job-labeled containers,
+networks, or volumes behind.
 
 ## Peer and final gates
 
