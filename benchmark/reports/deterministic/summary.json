@@ -1,0 +1,65 @@
+{
+  "total_queries": 26,
+  "by_category": {
+    "exact": {
+      "count": 6,
+      "recall@5": 0.0833,
+      "mrr@10": 0.0417,
+      "ndcg@10": 0.044
+    },
+    "multi_turn": {
+      "count": 1,
+      "recall@5": 0.0,
+      "mrr@10": 0.0,
+      "ndcg@10": 0.0
+    },
+    "multilingual": {
+      "count": 3,
+      "recall@5": 0.1667,
+      "mrr@10": 0.1111,
+      "ndcg@10": 0.1022
+    },
+    "near_duplicate": {
+      "count": 3,
+      "recall@5": 0.1667,
+      "mrr@10": 0.3333,
+      "ndcg@10": 0.2044
+    },
+    "no_evidence": {
+      "count": 4,
+      "recall@5": 0.0,
+      "mrr@10": 0.0,
+      "ndcg@10": 0.0
+    },
+    "paraphrase": {
+      "count": 4,
+      "recall@5": 0.25,
+      "mrr@10": 0.5,
+      "ndcg@10": 0.3066
+    },
+    "source_filter": {
+      "count": 1,
+      "recall@5": 0.0,
+      "mrr@10": 0.0,
+      "ndcg@10": 0.0
+    },
+    "temporal": {
+      "count": 4,
+      "recall@5": 0.0833,
+      "mrr@10": 0.05,
+      "ndcg@10": 0.0702
+    }
+  },
+  "overall": {
+    "recall@5": 0.1288,
+    "mrr@10": 0.172,
+    "ndcg@10": 0.1223
+  },
+  "no_evidence": {
+    "count": 4,
+    "returned_any_result": 4,
+    "returned_top_grade_ge2": 0,
+    "queries_returned_high_grade": []
+  },
+  "retrieval_stage_latency_s": 0.000396
+}

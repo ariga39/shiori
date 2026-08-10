@@ -1,0 +1,36 @@
+{"id": "d001", "ts": "2026-05-12T09:30:00Z", "source": "session-alice", "content": "基金代码 110022，易方达消费行业股票。基金经理萧楠，成立日 2010-08-20。近一年回报 18.4%。"}
+{"id": "d002", "ts": "2026-05-12T09:31:00Z", "source": "session-alice", "content": "The fund code is 110022, E Fund Consumer Industry Stock. Portfolio manager Xiao Nan. Inception date 2010-08-20. One-year return 18.4%."}
+{"id": "d003", "ts": "2026-06-03T14:00:00Z", "source": "session-bob", "content": "project kepler 的部署流程：先跑 make verify，再上传到 staging，最后手动触发 release。目标上线日期 2026-07-15。"}
+{"id": "d004", "ts": "2026-06-03T14:05:00Z", "source": "session-bob", "content": "Kepler deploy: run make verify first, upload to staging, then manually trigger release. Target go-live 2026-07-15."}
+{"id": "d005", "ts": "2026-07-20T11:00:00Z", "source": "export-wiki", "content": "kepler 项目已于 2026-07-18 上线。后续维护由 ops 组负责，每日 08:00 检查运行状态。"}
+{"id": "d006", "ts": "2026-07-21T10:00:00Z", "source": "session-bob", "content": "明天（7/22）早上要开 kepler 复盘会，议题：上线后的告警与回滚演练。"}
+{"id": "d007", "ts": "2026-04-01T08:00:00Z", "source": "session-carol", "content": "会议时间确认：每周四下午 3 点产品周会，会议室 A，通常 1 小时。"}
+{"id": "d008", "ts": "2026-04-08T08:00:00Z", "source": "session-carol", "content": "本周产品周会改到周五下午 2 点，会议室 B，因为周四会议室被占。"}
+{"id": "d009", "ts": "2026-04-09T08:05:00Z", "source": "session-carol", "content": "下周起产品周会恢复为每周四下午 3 点会议室 A，已通知全体。"}
+{"id": "d010", "ts": "2026-06-15T09:00:00Z", "source": "discord-dev", "content": "本地数据库迁移：ALTER TABLE sessions ADD COLUMN title text; 然后跑 rebuild_index 脚本。"}
+{"id": "d011", "ts": "2026-06-15T09:05:00Z", "source": "discord-dev", "content": "Run ALTER TABLE sessions ADD COLUMN title text; then run the rebuild_index script."}
+{"id": "d012", "ts": "2026-02-10T12:00:00Z", "source": "session-dana", "content": "关于项目北极星：如果查询没有答案，应当明确返回\"无证据\"而不是编造。这是红线。"}
+{"id": "d013", "ts": "2026-02-10T12:10:00Z", "source": "session-dana", "content": "The north star for retrieval: if there is no evidence, clearly say no-evidence instead of fabricating an answer. Red line."}
+{"id": "d014", "ts": "2026-03-05T15:20:00Z", "source": "session-eli", "content": "预算审批：单笔超过 5000 元需要 CFO 审批，低于 5000 元部门经理即可。"}
+{"id": "d015", "ts": "2026-03-06T09:00:00Z", "source": "session-eli", "content": "预算规则更新：审批门槛从 5000 元调整为 10000 元，超 10000 元才需 CFO。"}
+{"id": "d016", "ts": "2026-01-20T13:00:00Z", "source": "session-frank", "content": "我们用的缓存方案是 Redis，key 前缀 fm:，TTL 默认 900 秒。"}
+{"id": "d017", "ts": "2026-01-20T13:10:00Z", "source": "session-frank", "content": "缓存方案是 Redis，key 前缀 fm:，默认 TTL 15 分钟。"}
+{"id": "d018", "ts": "2026-05-30T16:00:00Z", "source": "session-gina", "content": "旅行计划：6 月 10 日到 6 月 14 日去京都，住四条附近的酒店，打算去伏见稻荷大社。"}
+{"id": "d019", "ts": "2026-06-01T09:00:00Z", "source": "session-gina", "content": "京都行程改到 7 月 12 日到 7 月 16 日，酒店改订大阪，因为京都订满了。"}
+{"id": "d020", "ts": "2026-06-05T10:00:00Z", "source": "session-gina", "content": "最终决定：不去大阪，仍住京都，7/12-7/16，酒店换到河原町。"}
+{"id": "d021", "ts": "2026-05-20T11:00:00Z", "source": "session-henry", "content": "客户 Honda 的合同编号 CONTRACT-2026-0042，付款周期 60 天，负责人 Li Wei。"}
+{"id": "d022", "ts": "2026-05-20T11:30:00Z", "source": "session-henry", "content": "Client Honda contract number CONTRACT-2026-0042, payment terms net-60, account owner Li Wei."}
+{"id": "d023", "ts": "2026-08-01T10:00:00Z", "source": "session-iris", "content": "新版本 v2.4 的 breaking change：search API 的 limit 参数上限从 50 改成 20。"}
+{"id": "d024", "ts": "2026-08-02T09:00:00Z", "source": "session-iris", "content": "v2.4 search API: the limit parameter cap changed from 50 to 20. Migration note for clients."}
+{"id": "d025", "ts": "2026-04-15T14:00:00Z", "source": "session-jack", "content": "排查结论：登录慢的根因是 DNS 解析超时，不是数据库。已把 resolver 换成 223.5.5.5。"}
+{"id": "d026", "ts": "2026-04-15T14:30:00Z", "source": "session-jack", "content": "Root cause of slow login: DNS resolution timeout, not the database. Switched resolver to a public DNS."}
+{"id": "d027", "ts": "2026-07-01T09:00:00Z", "source": "export-wiki", "content": "办公室地址：北京市朝阳区望京街道阜通东大街 6 号院，前台电话以 010- 开头。"}
+{"id": "d028", "ts": "2026-07-01T09:10:00Z", "source": "export-wiki", "content": "Office address: No. 6, Futong East Street, Wangjing, Chaoyang, Beijing."}
+{"id": "d029", "ts": "2026-05-25T18:00:00Z", "source": "session-kevin", "content": "今晚的聚餐定在七点，地点三里屯，已订位 6 人。"}
+{"id": "d030", "ts": "2026-05-25T18:05:00Z", "source": "session-kevin", "content": "聚餐改到八点，还是三里屯，订位 6 人不变。"}
+{"id": "d031", "ts": "2026-06-20T12:00:00Z", "source": "session-lily", "content": "报告模板更新：季度报告必须包含风险评估章节，模板路径 docs/report/q3-template.docx。"}
+{"id": "d032", "ts": "2026-06-20T12:05:00Z", "source": "session-lily", "content": "Quarterly report template now requires a risk assessment section. Template path docs/report/q3-template.docx."}
+{"id": "d033", "ts": "2026-03-10T09:00:00Z", "source": "session-mike", "content": "服务器采购预算：当前季度 2 万美元，含 3 台新机器，不含续费。"}
+{"id": "d034", "ts": "2026-03-11T09:00:00Z", "source": "session-mike", "content": "服务器采购预算更正：3 万美元，含 4 台新机器，续费另算。"}
+{"id": "d035", "ts": "2026-06-30T08:00:00Z", "source": "session-nina", "content": "端午节放假安排：6 月 22 日至 6 月 24 日放假，6 月 25 日补班。"}
+{"id": "d036", "ts": "2026-07-01T09:00:00Z", "source": "session-nina", "content": "补充：端午节期间值班表由各组长 6 月 18 日前提交。"}

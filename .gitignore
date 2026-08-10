@@ -25,3 +25,7 @@ venv.bak*/
 *.key
 *credentials*
 publish-task.md
+
+# 基准向量可重建，不入库（重建方法见 benchmark/README.md）
+benchmark/reports/*/document_vectors.json
+benchmark/reports/*/query_vectors.json

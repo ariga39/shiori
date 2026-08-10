@@ -1,0 +1,65 @@
+{
+  "total_queries": 26,
+  "by_category": {
+    "exact": {
+      "count": 6,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 1.0
+    },
+    "multi_turn": {
+      "count": 1,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 0.7967
+    },
+    "multilingual": {
+      "count": 3,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 1.0
+    },
+    "near_duplicate": {
+      "count": 3,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 1.0
+    },
+    "no_evidence": {
+      "count": 4,
+      "recall@5": 0.0,
+      "mrr@10": 0.0,
+      "ndcg@10": 0.0
+    },
+    "paraphrase": {
+      "count": 4,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 1.0
+    },
+    "source_filter": {
+      "count": 1,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 0.7579
+    },
+    "temporal": {
+      "count": 4,
+      "recall@5": 1.0,
+      "mrr@10": 1.0,
+      "ndcg@10": 1.0
+    }
+  },
+  "overall": {
+    "recall@5": 1.0,
+    "mrr@10": 1.0,
+    "ndcg@10": 0.9798
+  },
+  "no_evidence": {
+    "count": 4,
+    "returned_any_result": 4,
+    "returned_top_grade_ge2": 0,
+    "queries_returned_high_grade": []
+  },
+  "retrieval_stage_latency_s": 2.4e-05
+}

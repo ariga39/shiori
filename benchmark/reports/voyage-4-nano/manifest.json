@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0",
+  "corpusVersion": "v1",
+  "generator": {
+    "provider": "voyage-4-nano",
+    "modelRepo": "voyageai/voyage-4-nano",
+    "modelRevision": "67fabc9bef010dabc5f6024aa1b1b6b93410426f",
+    "library": "sentence-transformers",
+    "libraryVersion": "5.7.0",
+    "inputType": {
+      "document": "encode_document",
+      "query": "encode_query"
+    },
+    "dimension": 1024,
+    "normalization": "l2",
+    "dtype": "float32"
+  },
+  "files": {
+    "documents": "benchmark/corpus/v1/documents.jsonl",
+    "queries": "benchmark/corpus/v1/queries.jsonl"
+  },
+  "hashes": {
+    "documents": "aff589d2773af942e39067df526a74051efd124e026a4d10f58b8205bcc42b89",
+    "queries": "c28b8201995a89b8d0467a9dbfdf11322610d4f3b759cbd3411aa72058da8094",
+    "document_vectors": "a8b0dcb934d302385e7a29ff5681172602ca1190c702a5eff1b55997522d6d05",
+    "query_vectors": "b80d1a4a5604372c6160061c46cda45b94c0b2a07d0270bb2056ee8e6b9a9f5e"
+  },
+  "categories": [
+    "exact",
+    "paraphrase",
+    "multilingual",
+    "temporal",
+    "multi_turn",
+    "near_duplicate",
+    "source_filter",
+    "no_evidence"
+  ]
+}

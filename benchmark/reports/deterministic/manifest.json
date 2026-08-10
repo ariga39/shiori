@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0",
+  "corpusVersion": "v1",
+  "generator": {
+    "provider": "deterministic",
+    "modelRepo": "voyageai/voyage-4-nano",
+    "modelRevision": null,
+    "library": "sentence-transformers",
+    "libraryVersion": null,
+    "inputType": {
+      "document": "encode_document",
+      "query": "encode_query"
+    },
+    "dimension": 1024,
+    "normalization": "l2",
+    "dtype": "float32"
+  },
+  "files": {
+    "documents": "benchmark/corpus/v1/documents.jsonl",
+    "queries": "benchmark/corpus/v1/queries.jsonl"
+  },
+  "hashes": {
+    "documents": "aff589d2773af942e39067df526a74051efd124e026a4d10f58b8205bcc42b89",
+    "queries": "c28b8201995a89b8d0467a9dbfdf11322610d4f3b759cbd3411aa72058da8094",
+    "document_vectors": "00e645611d55ac0bf639fd7d7a63ed2feea0f156aab9b7ca81628dc4c8548a8d",
+    "query_vectors": "11251a122ef2ee79a35efde672593ee1ea8cfe94775f72856509a1087abab820"
+  },
+  "categories": [
+    "exact",
+    "paraphrase",
+    "multilingual",
+    "temporal",
+    "multi_turn",
+    "near_duplicate",
+    "source_filter",
+    "no_evidence"
+  ]
+}

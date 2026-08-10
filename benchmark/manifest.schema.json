@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shiori benchmark manifest",
+  "type": "object",
+  "required": ["schemaVersion", "corpusVersion", "generator", "files", "hashes", "categories"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "corpusVersion": {"type": "string"},
+    "generator": {
+      "type": "object",
+      "required": ["provider", "modelRepo", "modelRevision", "library", "inputType", "dimension", "normalization", "dtype"],
+      "properties": {
+        "provider": {"enum": ["voyage-4-nano", "deterministic"]},
+        "modelRepo": {"type": "string"},
+        "modelRevision": {"type": ["string", "null"]},
+        "library": {"type": "string"},
+        "libraryVersion": {"type": ["string", "null"]},
+        "inputType": {
+          "type": "object",
+          "properties": {"document": {"type": "string"}, "query": {"type": "string"}}
+        },
+        "dimension": {"type": "integer", "minimum": 1},
+        "normalization": {"const": "l2"},
+        "dtype": {"const": "float32"}
+      }
+    },
+    "files": {
+      "type": "object",
+      "required": ["documents", "queries"],
+      "properties": {
+        "documents": {"type": "string"},
+        "queries": {"type": "string"}
+      }
+    },
+    "hashes": {
+      "type": "object",
+      "required": ["documents", "queries"],
+      "properties": {
+        "documents": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "queries": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "document_vectors": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "query_vectors": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "categories": {
+      "type": "array",
+      "items": {"enum": ["exact", "paraphrase", "multilingual", "temporal", "multi_turn", "near_duplicate", "source_filter", "no_evidence"]}
+    }
+  }
+}
