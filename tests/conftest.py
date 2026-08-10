@@ -13,14 +13,14 @@ if REPO not in sys.path:
 # Test databases are opt-in and isolated.  Never fall back to a normal-user
 # credential file or a shared production DSN.  CI creates a random database
 # and marker table, then supplies both values below.
-_TEST_DSN = os.environ.get("SHIYI_TEST_DATABASE_DSN")
-_TEST_DB_NAME = os.environ.get("SHIYI_TEST_DATABASE_NAME")
-_TEST_DB_MARKER = os.environ.get("SHIYI_TEST_DATABASE_MARKER")
+_TEST_DSN = os.environ.get("SHIORI_TEST_DATABASE_DSN")
+_TEST_DB_NAME = os.environ.get("SHIORI_TEST_DATABASE_NAME")
+_TEST_DB_MARKER = os.environ.get("SHIORI_TEST_DATABASE_MARKER")
 if _TEST_DSN:
     # Existing legacy tests call ingest.load_credentials directly.  Make that
     # explicit test DSN visible to the application without allowing ambient
     # home credentials to participate.
-    os.environ["SHIYI_DATABASE_DSN"] = _TEST_DSN
+    os.environ["SHIORI_DATABASE_DSN"] = _TEST_DSN
 
 # Independent, known-good 1024-dim embedding vector (matches voyage-4-large).
 VALID_EMB = [0.01] * 1024
@@ -31,22 +31,22 @@ WRONG_EMB = [0.0, 0.0]
 def _connect():
     if not (_TEST_DSN and _TEST_DB_NAME and _TEST_DB_MARKER):
         pytest.skip(
-            "isolated PostgreSQL not configured; set SHIYI_TEST_DATABASE_DSN, "
-            "SHIYI_TEST_DATABASE_NAME, and SHIYI_TEST_DATABASE_MARKER"
+            "isolated PostgreSQL not configured; set SHIORI_TEST_DATABASE_DSN, "
+            "SHIORI_TEST_DATABASE_NAME, and SHIORI_TEST_DATABASE_MARKER"
         )
     conn = psycopg2.connect(_TEST_DSN)
     try:
         with conn.cursor() as cur:
             cur.execute("SELECT current_database()")
             database_name = cur.fetchone()[0]
-            cur.execute("SELECT marker FROM shiyi_test_guard")
+            cur.execute("SELECT marker FROM shiori_test_guard")
             marker = cur.fetchone()[0]
     except Exception:
         conn.close()
         raise
     if database_name != _TEST_DB_NAME or marker != _TEST_DB_MARKER:
         conn.close()
-        raise RuntimeError("refusing to use a non-matching isolated shiyi test database")
+        raise RuntimeError("refusing to use a non-matching isolated shiori test database")
     return conn
 
 

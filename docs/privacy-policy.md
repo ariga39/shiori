@@ -1,12 +1,12 @@
 # Privacy Policy
 
-Shiyi stores searchable long-term memory for AI agents. This document states
+Shiori stores searchable long-term memory for AI agents. This document states
 the local data-minimization and lifecycle contract that the ingestion and
 privacy seams enforce.
 
 ## Data minimization (fail-closed)
 
-- Every message text entering the store passes through `shiyi.privacy.minimize`
+- Every message text entering the store passes through `shiori.privacy.minimize`
   at the extraction seam (`ingest.extract_text_from_message` for sessions and
   Hermes, `ingest_discord.format_message` for Discord).
 - Recognized sensitive shapes are redacted before storage:
@@ -31,13 +31,13 @@ Each source declares a positive retention window:
 | hermes   | sqlite  | 90             |
 | discord  | jsonl   | 30             |
 
-`shiyi privacy retention-check --scope <s>` reports the managed-data age of the
+`shiori privacy retention-check --scope <s>` reports the managed-data age of the
 scope's rows using the store's aware-UTC `processed_at`/`created_at`, never the
 external source file mtimes. It performs no deletion.
 
 ## Scope and the managed store
 
-Privacy lifecycle operations act **only** on shiyi's own managed rows
+Privacy lifecycle operations act **only** on shiori's own managed rows
 (`session_chunks`, `session_facts`, `ingestion_state`). External source files
 (`sessions_dir`, `hermes_db`, `discord_archive_dir`) are read-only provenance:
 they are never unlinked, renamed, or rewritten by export or delete.
@@ -61,7 +61,7 @@ side effects. Symlinked or out-of-root provenance is rejected.
 
 ## Export
 
-- `shiyi privacy export --scope <s> --dest <p>` returns a dry-run (row count and
+- `shiori privacy export --scope <s> --dest <p>` returns a dry-run (row count and
   destination) without writing.
 - With `--yes`, the export is written atomically (same-directory temp file +
   fsync + chmod 0600 + atomic replace). A destination whose content is already
@@ -73,7 +73,7 @@ side effects. Symlinked or out-of-root provenance is rejected.
 
 ## Delete
 
-- `shiyi privacy delete --scope <s>` returns a dry-run count without touching
+- `shiori privacy delete --scope <s>` returns a dry-run count without touching
   anything.
 - With `--yes`, deletion is a single transaction that removes only the managed
   rows and checkpoints bound to the selected scope's resolved file paths; any
@@ -84,7 +84,7 @@ side effects. Symlinked or out-of-root provenance is rejected.
 
 ## Provider disclosure
 
-- `shiyi privacy providers` lists each source's provider endpoint, data flow,
+- `shiori privacy providers` lists each source's provider endpoint, data flow,
   retention window, and local-only status, and reports `configured` or
   `not_configured` for each source and for the embedding provider.
 - The embedding provider, when configured, is reported with its real endpoint

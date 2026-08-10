@@ -20,7 +20,7 @@ def _git(root: Path, *args: str) -> None:
 
 def test_safe_fixture_findings_are_retained_but_non_blocking() -> None:
     findings = release_audit._scan_text(
-        "contact=test@example.invalid\nkey=sk_live_0123456789abcdef\npath=/home/u/project\npassword=shiyi-ci-only",
+        "contact=test@example.invalid\nkey=sk_live_0123456789abcdef\npath=/home/u/project\npassword=shiori-ci-only",
         object_prefix="a" * 40,
         source="reachable_blob",
         path="tests/fixture.py",

@@ -23,9 +23,9 @@ import psycopg2.sql
 import requests
 import tiktoken
 
-from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
-from shiyi.embeddings import deterministic_embedding
-from shiyi.privacy import minimize as privacy_minimize
+from shiori.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiori.embeddings import deterministic_embedding
+from shiori.privacy import minimize as privacy_minimize
 
 # ── Config ───────────────────────────────────────────────────────────────────
 ARCHIVE_DIR = None
@@ -251,7 +251,7 @@ def build_chunks(messages, channel_name):
     total_tokens = len(all_tokens)
     chunks = []
     tok_start = 0
-    from shiyi.session_ids import discord_session_id
+    from shiori.session_ids import discord_session_id
 
     session_id = discord_session_id(channel_name)
 
@@ -474,7 +474,7 @@ def main(argv=None):
     parser.add_argument(
         "--legacy-openclaw",
         action="store_true",
-        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIORI_* is unset",
     )
     args = parser.parse_args(argv)
 
@@ -506,7 +506,7 @@ def main(argv=None):
         else:
             if ARCHIVE_DIR is None:
                 raise ConfigError(
-                    "discord source is disabled; set SHIYI_DISCORD_ARCHIVE_DIR",
+                    "discord source is disabled; set SHIORI_DISCORD_ARCHIVE_DIR",
                     code="source_not_configured",
                 )
             jsonl_files = sorted(ARCHIVE_DIR.glob("*.jsonl"))

@@ -81,7 +81,7 @@ def _run(tmp_path: Path, **flags: str) -> tuple[subprocess.CompletedProcess[str]
         "POSTGRES_DB": "synthetic",
         "POSTGRES_USER": "synthetic",
         "POSTGRES_PASSWORD": "synthetic",
-        "SHIYI_PG_PORT": "55432",
+        "SHIORI_PG_PORT": "55432",
         **flags,
     }
     result = subprocess.run(

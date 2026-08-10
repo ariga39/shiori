@@ -26,9 +26,9 @@ while (($#)); do
   esac
 done
 [[ -x "${cli}" && -x "${python_bin}" && -n "${dsn}" && -n "${database_name}" && -n "${workdir}" ]] || usage
-marker="${SHIYI_TEST_DATABASE_MARKER:-}"
+marker="${SHIORI_TEST_DATABASE_MARKER:-}"
 
-for variable in $(compgen -v | grep '^SHIYI_' || true); do
+for variable in $(compgen -v | grep '^SHIORI_' || true); do
   unset "${variable}"
 done
 unset PGHOST PGPORT PGDATABASE PGUSER PGSERVICE PGPASSFILE PGOPTIONS
@@ -37,15 +37,15 @@ mkdir -p "${workdir}/home" "${workdir}/sessions" "${workdir}/discord" "${workdir
 export HOME="${workdir}/home"
 export XDG_CONFIG_HOME="${workdir}/home/.config"
 export XDG_CACHE_HOME="${workdir}/home/.cache"
-export SHIYI_DATABASE_DSN="${dsn}"
-export SHIYI_TEST_DATABASE_DSN="${dsn}"
-export SHIYI_TEST_DATABASE_NAME="${database_name}"
-export SHIYI_TEST_DATABASE_MARKER="${marker:?marker must be supplied by the isolated test invocation}"
+export SHIORI_DATABASE_DSN="${dsn}"
+export SHIORI_TEST_DATABASE_DSN="${dsn}"
+export SHIORI_TEST_DATABASE_NAME="${database_name}"
+export SHIORI_TEST_DATABASE_MARKER="${marker:?marker must be supplied by the isolated test invocation}"
 # The harness is deliberately self-contained; never inherit a host user's
 # ambient PostgreSQL password into an isolated smoke run.
-export PGPASSWORD="shiyi-ci-only"
+export PGPASSWORD="shiori-ci-only"
 
-if [[ ! "${database_name}" =~ ^shiyi_test[A-Za-z0-9_-]*$ ]]; then
+if [[ ! "${database_name}" =~ ^shiori_test[A-Za-z0-9_-]*$ ]]; then
   echo "refusing a non-isolated database name" >&2
   exit 1
 fi
@@ -54,7 +54,7 @@ if [[ "${actual_database}" != "${database_name}" ]]; then
   echo "connected database does not match the declared isolated name" >&2
   exit 1
 fi
-if [[ ! "${SHIYI_TEST_DATABASE_MARKER}" =~ ^ci-[A-Za-z0-9_-]+$ ]]; then
+if [[ ! "${SHIORI_TEST_DATABASE_MARKER}" =~ ^ci-[A-Za-z0-9_-]+$ ]]; then
   echo "refusing malformed isolated database marker" >&2
   exit 1
 fi
@@ -68,32 +68,32 @@ cat > "${credential_file}" <<EOF
 host=127.0.0.1
 port=5432
 dbname=${database_name}
-user=shiyi_ci
+user=shiori_ci
 password=${PGPASSWORD}
 EOF
 chmod 600 "${credential_file}"
-unset SHIYI_DATABASE_DSN
-export SHIYI_PG_CRED="${credential_file}"
+unset SHIORI_DATABASE_DSN
+export SHIORI_PG_CRED="${credential_file}"
 
 psql "${dsn}" --set ON_ERROR_STOP=1 \
-  --command "CREATE TABLE IF NOT EXISTS shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES ('${SHIYI_TEST_DATABASE_MARKER}') ON CONFLICT (marker) DO NOTHING;"
-guard_count="$(psql "${dsn}" --set ON_ERROR_STOP=1 --tuples-only --no-align --command 'SELECT count(*) FROM shiyi_test_guard;')"
-guard_marker="$(psql "${dsn}" --set ON_ERROR_STOP=1 --tuples-only --no-align --command 'SELECT marker FROM shiyi_test_guard ORDER BY marker LIMIT 1;')"
-if [[ "${guard_count}" != 1 || "${guard_marker}" != "${SHIYI_TEST_DATABASE_MARKER}" ]]; then
+  --command "CREATE TABLE IF NOT EXISTS shiori_test_guard (marker text PRIMARY KEY); INSERT INTO shiori_test_guard(marker) VALUES ('${SHIORI_TEST_DATABASE_MARKER}') ON CONFLICT (marker) DO NOTHING;"
+guard_count="$(psql "${dsn}" --set ON_ERROR_STOP=1 --tuples-only --no-align --command 'SELECT count(*) FROM shiori_test_guard;')"
+guard_marker="$(psql "${dsn}" --set ON_ERROR_STOP=1 --tuples-only --no-align --command 'SELECT marker FROM shiori_test_guard ORDER BY marker LIMIT 1;')"
+if [[ "${guard_count}" != 1 || "${guard_marker}" != "${SHIORI_TEST_DATABASE_MARKER}" ]]; then
   echo "isolated database guard mismatch" >&2
   exit 1
 fi
 
 config="${workdir}/config.toml"
 printf '%s\n' \
-  '[shiyi]' \
+  '[shiori]' \
   "sessions_dir = \"${workdir}/sessions\"" \
   "hermes_db = \"${workdir}/hermes.db\"" \
   "discord_archive_dir = \"${workdir}/discord\"" \
   'embedding_provider = "fake"' \
   'allow_fake_embeddings = true' \
   'environment = "test"' \
-  'voyage_model = "shiyi-fake-v1"' \
+  'voyage_model = "shiori-fake-v1"' \
   'embed_dim = 1024' \
   > "${config}"
 
@@ -153,9 +153,9 @@ run privacy delete --scope discord >/dev/null
 run privacy delete --scope discord --yes >/dev/null
 run privacy delete --scope discord --yes >/dev/null
 
-backup="${workdir}/exports/shiyi.dump"
+backup="${workdir}/exports/shiori.dump"
 run db backup "${backup}" >/dev/null
-restore_name="shiyi_restore_ci_${GITHUB_RUN_ID:-local}_${GITHUB_RUN_ATTEMPT:-1}"
+restore_name="shiori_restore_ci_${GITHUB_RUN_ID:-local}_${GITHUB_RUN_ATTEMPT:-1}"
 restore_json="${workdir}/restore.json"
 run db restore "${backup}" --target "${restore_name}" > "${restore_json}"
 restored_db="$(${python_bin} - "${restore_json}" <<'PY'
@@ -166,12 +166,12 @@ from urllib.parse import urlsplit
 with open(sys.argv[1], encoding="utf-8") as stream:
     payload = json.load(stream)
 name = urlsplit(payload["staging_dsn"]).path.lstrip("/")
-if not name.startswith("shiyi_restore_ci_"):
+if not name.startswith("shiori_restore_ci_"):
     raise SystemExit("unexpected restore database name")
 print(name)
 PY
 )"
-dropdb --if-exists --host 127.0.0.1 --port 5432 --username shiyi_ci --no-password -- "${restored_db}"
+dropdb --if-exists --host 127.0.0.1 --port 5432 --username shiori_ci --no-password -- "${restored_db}"
 
 "${python_bin}" "${PWD}/tools/mcp_stdio_smoke.py" --cli "${cli}" --config "${config}" >/dev/null
 echo "clean-machine smoke ok: migrate health ingest query privacy backup restore MCP"
