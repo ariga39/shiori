@@ -125,6 +125,17 @@ def minimize(text: str) -> str:
     return _redact(text)
 
 
+def _minimize_value(value: Any) -> Any:
+    """Recursively minimize every string in a nested value."""
+    if isinstance(value, str):
+        return minimize(value)
+    if isinstance(value, list):
+        return [_minimize_value(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _minimize_value(item) for key, item in value.items()}
+    return value
+
+
 def registered_sources() -> tuple[IngestSource, ...]:
     return _SOURCES
 
@@ -257,12 +268,9 @@ def _discover_sessions_files(root: Path) -> list[Path]:
 
 
 def _derive_session_id_from_path(file_path: str) -> str:
-    """Mirror ingest.derive_session_id for a provenance file path."""
-    basename = os.path.basename(file_path)
-    uuid_part = basename.split(".")[0]
-    if ".deleted." in basename:
-        return uuid_part + ":deleted"
-    return uuid_part
+    from .session_ids import derive_session_id as _shared_derive
+
+    return _shared_derive(file_path)
 
 
 def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
@@ -270,8 +278,9 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
 
     Sessions and discord are discovered from the configured source roots using
     the real adapter rules; hermes uses the ``hermes://`` ingestion_state
-    bindings. Symlinked or out-of-root paths are rejected. A scope that cannot
-    be uniquely attributed fails closed with ``scope_evidence_unavailable``.
+    bindings. Symlinked or out-of-root paths are rejected with
+    ``scope_evidence_unavailable``. An enabled scope with no managed rows is a
+    legal empty result (delete replays as zero), not an ambiguity.
     """
     if scope not in {"sessions", "discord", "hermes"}:
         raise PrivacyError(f"unknown scope: {scope}", code="unknown_scope")
@@ -283,6 +292,12 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
     bindings: list[ScopeBinding] = []
 
     if scope == "hermes":
+        hermes_db = getattr(settings, "hermes_db", None)
+        if hermes_db is None:
+            raise PrivacyError(
+                "hermes source is not configured",
+                code="source_not_configured",
+            )
         for file_path, processed_at in state_rows.items():
             if file_path.startswith("hermes://"):
                 bindings.append(
@@ -292,11 +307,6 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
                         processed_at=processed_at,
                     )
                 )
-        if not bindings:
-            raise PrivacyError(
-                "no hermes:// provenance binding found",
-                code="scope_evidence_unavailable",
-            )
         return bindings
 
     root = getattr(settings, "sessions_dir" if scope == "sessions" else "discord_archive_dir", None)
@@ -311,6 +321,8 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
             f"{scope} source root does not exist",
             code="scope_evidence_unavailable",
         )
+    from .session_ids import discord_session_id
+
     for candidate in _discover_sessions_files(root_path) if scope == "sessions" else sorted(root_path.glob("*.jsonl")):
         resolved = candidate.resolve()
         try:
@@ -327,9 +339,7 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
             )
         file_path = str(resolved)
         if scope == "discord":
-            session_id = f"discord-{candidate.stem}"
-            if candidate.stem.startswith("discord-"):
-                session_id = candidate.stem
+            session_id = discord_session_id(candidate.stem)
         else:
             session_id = _derive_session_id_from_path(file_path)
         bindings.append(
@@ -339,34 +349,49 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
                 processed_at=state_rows.get(file_path),
             )
         )
-    if not bindings:
-        raise PrivacyError(
-            f"no {scope} provenance found",
-            code="scope_evidence_unavailable",
-        )
     return bindings
 
 
 def _resolve_scopes(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
     """Resolve one scope or the atomic union ``all``.
 
-    ``all`` resolves every configured scope and requires every one to be
-    unambiguous; any ambiguity fails the whole operation with zero side effects.
+    ``all`` expands only the sources explicitly enabled in ``settings``; an
+    unenabled source is not a failure. If no source is enabled at all it fails
+    with ``no_configured_sources``. Real ambiguity (a session id or file path
+    claimed by more than one scope) fails the whole operation with zero side
+    effects; enabled-but-empty scopes contribute nothing.
     """
     if scope == "all":
         all_bindings: list[ScopeBinding] = []
+        enabled = 0
         for name in ("sessions", "discord", "hermes"):
             try:
                 all_bindings.extend(_scope_bindings(conn, settings, name))
+                enabled += 1
             except PrivacyError as exc:
                 if exc.code == "source_not_configured":
                     continue
                 raise
-        if not all_bindings:
+        if enabled == 0:
             raise PrivacyError(
-                "no configured scope has resolvable provenance",
-                code="scope_evidence_unavailable",
+                "no configured source is enabled",
+                code="no_configured_sources",
             )
+        seen_session: dict[str, str] = {}
+        seen_path: dict[str, str] = {}
+        for b in all_bindings:
+            if b.session_id in seen_session and seen_session[b.session_id] != b.file_path:
+                raise PrivacyError(
+                    f"session {b.session_id!r} is claimed by more than one scope",
+                    code="scope_evidence_unavailable",
+                )
+            seen_session[b.session_id] = b.file_path
+            if b.file_path in seen_path and seen_path[b.file_path] != b.session_id:
+                raise PrivacyError(
+                    f"file path {b.file_path!r} maps to more than one session",
+                    code="scope_evidence_unavailable",
+                )
+            seen_path[b.file_path] = b.session_id
         return all_bindings
     return _scope_bindings(conn, settings, scope)
 
@@ -401,15 +426,30 @@ def delete_scope(
     bindings = _resolve_scopes(conn, settings, scope)
     if older_than_days is not None:
         now = datetime.now(tz=UTC)
-        kept = []
+        # Group by session: a session is only eligible when EVERY one of its
+        # bindings is older than the threshold, so an old checkpoint cannot
+        # carry away still-active data for the same session.
+        by_session: dict[str, list[ScopeBinding]] = {}
         for b in bindings:
-            if b.processed_at is None:
-                continue
-            ts = b.processed_at
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=UTC)
-            if (now - ts).total_seconds() / 86400 > older_than_days:
-                kept.append(b)
+            by_session.setdefault(b.session_id, []).append(b)
+
+        def _session_old_enough(session_bindings: list[ScopeBinding]) -> bool:
+            if not session_bindings:
+                return False
+            for b in session_bindings:
+                if b.processed_at is None:
+                    return False
+                ts = b.processed_at
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                if (now - ts).total_seconds() / 86400 <= older_than_days:
+                    return False
+            return True
+
+        kept = []
+        for session_bindings in by_session.values():
+            if _session_old_enough(session_bindings):
+                kept.extend(session_bindings)
         bindings = kept
     sids = _session_ids(bindings)
     paths = _checkpoint_paths(bindings)
@@ -483,16 +523,16 @@ def export_scope(
     sids = _session_ids(bindings)
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT session_id, source_type, content, timestamp_start, timestamp_end "
+            "SELECT id, session_id, source_type, content, timestamp_start, timestamp_end "
             "FROM session_chunks WHERE session_id = ANY(%s) "
-            "ORDER BY session_id, timestamp_start, content",
+            "ORDER BY session_id, timestamp_start, content, id",
             (sids,),
         )
         chunk_rows = cur.fetchall()
         cur.execute(
-            "SELECT session_id, category, content, \"timestamp\", task_summary "
+            "SELECT id, session_id, category, content, \"timestamp\", task_summary "
             "FROM session_facts WHERE session_id = ANY(%s) "
-            "ORDER BY session_id, category, \"timestamp\", content",
+            "ORDER BY session_id, category, \"timestamp\", content, id",
             (sids,),
         )
         fact_rows = cur.fetchall()
@@ -501,22 +541,22 @@ def export_scope(
         rows.append(
             {
                 "kind": "chunk",
-                "session": hashlib.sha256((r[0] or "").encode("utf-8")).hexdigest()[:16],
-                "source_type": r[1],
-                "content": minimize(r[2]) if r[2] else "",
-                "timestamp_start": r[3].isoformat() if r[3] else None,
-                "timestamp_end": r[4].isoformat() if r[4] else None,
+                "session": hashlib.sha256((r[1] or "").encode("utf-8")).hexdigest()[:16],
+                "source_type": _minimize_value(r[2]),
+                "content": _minimize_value(r[3]),
+                "timestamp_start": r[4].isoformat() if r[4] else None,
+                "timestamp_end": r[5].isoformat() if r[5] else None,
             }
         )
     for r in fact_rows:
         rows.append(
             {
                 "kind": "fact",
-                "session": hashlib.sha256((r[0] or "").encode("utf-8")).hexdigest()[:16],
-                "category": r[1],
-                "content": minimize(r[2]) if r[2] else "",
-                "timestamp": r[3].isoformat() if r[3] else None,
-                "task_summary": minimize(r[4]) if r[4] else None,
+                "session": hashlib.sha256((r[1] or "").encode("utf-8")).hexdigest()[:16],
+                "category": _minimize_value(r[2]),
+                "content": _minimize_value(r[3]),
+                "timestamp": r[4].isoformat() if r[4] else None,
+                "task_summary": _minimize_value(r[5]),
             }
         )
     payload = json.dumps({"scope": scope, "rows": rows}, ensure_ascii=False, indent=2)

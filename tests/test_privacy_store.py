@@ -106,6 +106,16 @@ def test_scope_discord_maps_plain_stem(clean_db, tmp_path):
     assert all(sid.startswith("discord-") for sid in sids)
 
 
+def test_scope_discord_unconditional_prefix(clean_db, tmp_path):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    _seed(conn, settings)
+    (settings.discord_archive_dir / "discord-general.jsonl").write_text("x\n", encoding="utf-8")
+    bindings = privacy._scope_bindings(conn, settings, "discord")
+    sids = [b.session_id for b in bindings]
+    assert "discord-discord-general" in sids
+
+
 def test_scope_hermes_resolves_from_binding(clean_db, tmp_path):
     conn = clean_db
     settings = _settings(tmp_path)
@@ -270,3 +280,68 @@ def test_retention_check_reports_managed_age(clean_db, tmp_path):
     assert "retention_days" in report
     assert report["total"] > 0
     assert "managed_data_age" in report
+
+
+def test_all_skips_unenabled_sources(clean_db, tmp_path):
+    conn = clean_db
+    full = _settings(tmp_path)
+    _seed(conn, full)
+    settings = Settings(sessions_dir=full.sessions_dir)  # discord/hermes unenabled
+    bindings = privacy._resolve_scopes(conn, settings, "all")
+    sids = [b.session_id for b in bindings]
+    assert "abc-123" in sids
+    assert not any(s.startswith("discord-") for s in sids)
+
+
+def test_all_no_configured_sources_fails(clean_db, tmp_path):
+    conn = clean_db
+    settings = Settings()  # nothing enabled
+    with pytest.raises(privacy.PrivacyError) as exc:
+        privacy._resolve_scopes(conn, settings, "all")
+    assert exc.value.code == "no_configured_sources"
+
+
+def test_delete_empty_scope_is_idempotent_zero(clean_db, tmp_path):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    _seed(conn, settings)
+    privacy.delete_scope(conn, "sessions", settings=settings, confirm=True)
+    # second delete on an empty (but enabled) scope -> legal 0
+    result = privacy.delete_scope(conn, "sessions", settings=settings, confirm=True)
+    assert result["deleted_chunks"] == 0
+
+
+def test_delete_older_than_keeps_session_with_young_binding(clean_db, tmp_path):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    _seed(conn, settings)
+    # sessions has two sessions; age only ONE checkpoint so that session must be kept
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE ingestion_state SET processed_at = now() - interval '100 days' "
+            "WHERE file_path = %s",
+            (str(settings.sessions_dir / "abc-123.jsonl"),),
+        )
+        conn.commit()
+    # abc-123 is old; abc-124 has no checkpoint row (processed_at NULL) -> kept
+    result = privacy.delete_scope(conn, "sessions", settings=settings, confirm=False, older_than_days=30)
+    # only abc-123 is fully-old and eligible
+    assert result["would_delete_chunks"] == 1
+    assert result["would_delete_checkpoints"] == 1
+
+
+def test_export_recursively_minimizes(clean_db, tmp_path):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    _seed(conn, settings)
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE session_chunks SET content = %s WHERE session_id = %s",
+            ("contact a@b.example with token sk_live_abcdef0123456789", "abc-123"),
+        )
+        conn.commit()
+    dest = tmp_path / "export.json"
+    privacy.export_scope(conn, "sessions", dest, settings=settings, confirm=True)
+    text = dest.read_text(encoding="utf-8")
+    assert "a@b.example" not in text
+    assert "sk_live_abcdef0123456789" not in text

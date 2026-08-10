@@ -247,7 +247,9 @@ def build_chunks(messages, channel_name):
     total_tokens = len(all_tokens)
     chunks = []
     tok_start = 0
-    session_id = f"discord-{channel_name}"
+    from shiyi.session_ids import discord_session_id
+
+    session_id = discord_session_id(channel_name)
 
     while tok_start < total_tokens:
         tok_end = min(tok_start + CHUNK_TOKENS, total_tokens)
