@@ -24,6 +24,7 @@ import requests
 import tiktoken
 
 from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiyi.embeddings import deterministic_embedding
 from shiyi.privacy import minimize as privacy_minimize
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ VOYAGE_MODEL = "voyage-4-large"
 VOYAGE_KEY_PATH = None
 VOYAGE_API_KEY = None
 EMBED_DIM = 1024
+EMBEDDING_PROVIDER = "voyage"
 
 CHUNK_TOKENS = 400
 CHUNK_OVERLAP = 80
@@ -68,7 +70,7 @@ def apply_settings(settings: Settings) -> None:
     the old unit tests; real commands fail closed when they try to use them.
     """
     global SESSIONS_DIR, PG_CRED_PATH, DATABASE_DSN
-    global VOYAGE_API_URL, VOYAGE_KEY_PATH, VOYAGE_API_KEY, VOYAGE_MODEL, EMBED_DIM
+    global VOYAGE_API_URL, VOYAGE_KEY_PATH, VOYAGE_API_KEY, VOYAGE_MODEL, EMBED_DIM, EMBEDDING_PROVIDER
     global CHUNK_TOKENS, CHUNK_OVERLAP, VOYAGE_BATCH_SIZE, VOYAGE_RPS_LIMIT
     global EMBED_TIMEOUT, MAX_RETRIES, ADVISORY_LOCK_ID
 
@@ -88,6 +90,8 @@ def apply_settings(settings: Settings) -> None:
         VOYAGE_MODEL = settings.voyage_model
     if settings.embed_dim is not None:
         EMBED_DIM = settings.embed_dim
+    if settings.embedding_provider is not None:
+        EMBEDDING_PROVIDER = settings.embedding_provider
     CHUNK_TOKENS = settings.chunk_tokens
     CHUNK_OVERLAP = settings.chunk_overlap
     VOYAGE_BATCH_SIZE = settings.voyage_batch_size
@@ -329,6 +333,8 @@ def chunk_messages(messages, session_id, source_type):
 # ── Voyage embedding ────────────────────────────────────────────────────────
 def embed_texts_with_retry(texts):
     """Embed via Voyage API. Returns (embeddings, failed_indices)."""
+    if EMBEDDING_PROVIDER == "fake":
+        return [deterministic_embedding(text, dimension=EMBED_DIM) for text in texts], []
     api_key = _read_voyage_key()
     all_embeddings = [None] * len(texts)
     failed_indices = []
