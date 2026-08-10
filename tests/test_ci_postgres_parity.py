@@ -10,9 +10,10 @@ def test_ci_enables_and_verifies_pgvector_preload_before_database_setup():
     block = workflow[preload:prepare]
 
     assert "ALTER SYSTEM SET shared_preload_libraries = 'vector'" in block
-    assert "docker ps --format '{{.ID}} {{.Image}}'" in block
+    assert 'service_container="${{ job.services.postgres.id }}"' in block
+    assert 'tools/verify_pgvector_image.sh "${expected_image}" "${service_container}"' in block
     assert "sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38" in block
-    assert "docker restart \"${containers[0]}\"" in block
+    assert 'docker restart "${service_container}"' in block
     assert "pg_isready --host 127.0.0.1 --port 5432" in block
     assert "SHOW shared_preload_libraries;" in block
     assert "grep -Eq '(^|[,[:space:]])vector([,[:space:]]|$)'" in block
@@ -25,7 +26,8 @@ def test_ci_preload_gate_is_fail_closed():
     block = workflow[preload:prepare]
 
     assert "exit 1" in block
-    assert "if (( ${#containers[@]} != 1 )); then" in block
+    assert "if [[ ! \"${service_container}\" =~ ^[0-9a-f]{12,64}$ ]]; then" in block
+    assert 'tools/verify_pgvector_image.sh "${expected_image}" "${service_container}"' in block
     assert "if [[ \"${ready}\" != true ]]; then" in block
     assert "if ! grep -Eq" in block
 
