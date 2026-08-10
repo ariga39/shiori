@@ -1,0 +1,5 @@
+# Generated artifacts for the task #11 benchmark. Full vectors and any local
+# model outputs go under `.generated/` and are NOT committed. The manifest,
+# per-query/aggregate results JSON, and the rendered report ARE committed so the
+# benchmark is auditable; regenerate them from the committed fixtures + lock.
+.generated/
