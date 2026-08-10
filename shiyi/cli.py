@@ -40,6 +40,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     serve = sub.add_parser("serve", help="run the read-only MCP server")
     _config_args(serve, suppress_default=True)
+
+    db = sub.add_parser("db", help="database schema/repository operations")
+    _config_args(db, suppress_default=True)
+    db_sub = db.add_subparsers(dest="db_command", required=True)
+    db_sub.add_parser("migrate", help="apply forward-only migrations")
+    db_sub.add_parser("health", help="repository health/version check")
+    backup = db_sub.add_parser("backup", help="backup repository to a pg_dump file")
+    backup.add_argument("dest", help="backup path (must not exist)")
+    restore = db_sub.add_parser("restore", help="restore a backup into a NEW staging database")
+    restore.add_argument("src", help="backup path")
+    restore.add_argument("--target", required=True, help="new staging database name (must not exist)")
     return parser
 
 
@@ -119,6 +130,65 @@ def _run_serve(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
+def _run_db(args: argparse.Namespace, settings: Settings) -> int:
+    # DB schema/repository operations need the database, never embeddings.
+    settings.require_database()
+    import json as _json
+    from pathlib import Path
+
+    import psycopg2
+
+    from .config import credentials_from_settings
+    from .migrations import MigrationError, migrate, schema_version
+    from .repository import backup, repository_health, restore
+
+    creds = credentials_from_settings(settings)
+    dsn = creds["dsn"]
+    conn = psycopg2.connect(dsn)
+    try:
+        if args.db_command == "health":
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            health = repository_health(conn, migrations_dir=migrations_dir)
+            print(_json.dumps(health, sort_keys=True, default=str))
+            return 0 if health["ok"] else 2
+        if args.db_command == "migrate":
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            applied = migrate(conn, migrations_dir=migrations_dir)
+            print(_json.dumps({"applied": applied, "version": schema_version(conn)}, sort_keys=True))
+            return 0
+        if args.db_command == "backup":
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            result = backup(conn, Path(args.dest), migrations_dir=migrations_dir)
+            print(_json.dumps({"ok": result["ok"], "path": result["path"],
+                               "manifest_path": result["manifest_path"],
+                               "schema_head": result["schema_head"], "digest": result["digest"]},
+                              sort_keys=True))
+            return 0
+        if args.db_command == "restore":
+            from pathlib import Path as _Path
+
+            migrations_dir = _Path(__file__).resolve().parent / "schema_migrations"
+            result = restore(conn, Path(args.src), target_name=args.target,
+                             migrations_dir=migrations_dir)
+            print(_json.dumps({"ok": result["ok"], "staging_dsn": result["staging_dsn"],
+                               "marker": result["marker"], "schema_head": result["schema_head"]},
+                              sort_keys=True))
+            return 0
+        print("error[unknown_db_command]", file=sys.stderr)
+        return 2
+    except MigrationError as exc:
+        print(f"error[{exc.code}]: {exc.message}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -127,6 +197,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_ingest(args, settings)
         if args.command == "query":
             return _run_query(args, settings)
+        if args.command == "db":
+            return _run_db(args, settings)
         return _run_serve(args, settings)
     except ConfigError as exc:
         print(f"error[{exc.code}]: {exc}", file=sys.stderr)
