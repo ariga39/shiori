@@ -92,7 +92,10 @@ container_id="$("${compose[@]}" ps --quiet session-memory-pg | tr -d '\r\n')"
   echo "compose did not start exactly one database container" >&2
   exit 1
 }
-mapfile -t project_volumes < <(docker volume ls -q --filter "label=com.docker.compose.project=${project}")
+project_volumes=()
+while IFS= read -r line; do
+  project_volumes+=("${line}")
+done < <(docker volume ls -q --filter "label=com.docker.compose.project=${project}")
 if (( ${#project_volumes[@]} != 1 )); then
   echo "compose did not create exactly one project-scoped data volume" >&2
   exit 1
