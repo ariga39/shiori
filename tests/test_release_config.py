@@ -21,6 +21,9 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "clean_machine_smoke.sh" in workflow
     assert "legacy_schema_upgrade_smoke.sh" in workflow
     assert "trivy-action" in workflow
+    assert "docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}'" in workflow
+    assert f'expected_image="pgvector/pgvector@{PGVECTOR_DIGEST}"' in workflow
+    assert "pgvector service image digest does not match the pinned digest" in workflow
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "raw_logs_uploaded\":false" in workflow
     assert "retention-days: 1" in workflow

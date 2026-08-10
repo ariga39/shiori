@@ -117,12 +117,18 @@ jobs:
             --set ON_ERROR_STOP=1 \
             --command "ALTER SYSTEM SET shared_preload_libraries = 'vector';"
 
+          expected_image="pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38"
           mapfile -t containers < <(
             docker ps --format '{{.ID}} {{.Image}}' \
-              | awk '$2 ~ /^pgvector\/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38$/ {print $1}'
+              | awk '$2 ~ /^pgvector\/pgvector([:@]|$)/ {print $1}'
           )
           if (( ${#containers[@]} != 1 )); then
             echo "expected exactly one pgvector service container" >&2
+            exit 1
+          fi
+          if ! docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${containers[0]}" \
+            | grep -Fxq "${expected_image}"; then
+            echo "pgvector service image digest does not match the pinned digest" >&2
             exit 1
           fi
           docker restart "${containers[0]}" >/dev/null
