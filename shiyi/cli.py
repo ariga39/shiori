@@ -221,21 +221,23 @@ def _run_privacy(args: argparse.Namespace, settings: Settings) -> int:
     # export/delete/retention-check operate on the managed store, so they need a DB.
     import psycopg2
 
-    dsn = settings.require_database()
-    conn = psycopg2.connect(str(dsn))
+    from .config import credentials_from_settings
+
+    conn = psycopg2.connect(credentials_from_settings(settings)["dsn"])
     try:
         if args.privacy_command == "export":
             result = export_scope(
-                conn, args.scope, args.dest, "cli", confirm=args.yes
+                conn, args.scope, args.dest, settings=settings, confirm=args.yes
             )
             print(_json.dumps(result, sort_keys=True, ensure_ascii=False))
             return 0
         if args.privacy_command == "retention-check":
-            result = retention_check(conn, args.scope, "cli")
+            result = retention_check(conn, args.scope, settings=settings)
             print(_json.dumps(result, sort_keys=True, ensure_ascii=False))
             return 0
         result = delete_scope(
-            conn, args.scope, "cli",
+            conn, args.scope,
+            settings=settings,
             confirm=args.yes,
             older_than_days=args.older_than,
         )

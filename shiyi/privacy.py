@@ -1,16 +1,19 @@
 """Privacy lifecycle seam for shiyi.
 
 Fail-closed contract:
-- :func:`minimize` never echoes a value it cannot positively classify as safe
-  to keep; anything matching a recognized sensitive shape is redacted.
-- :func:`export` and :func:`delete` perform no filesystem side effect unless
-  confirmation is explicit.
-- :func:`retention_policy` and :func:`providers` expose the per-source policy
-  so operators can verify data handling without reading source code.
+- :func:`minimize` redacts every value that matches a recognized sensitive
+  shape and rejects input types it cannot safely handle; it does not claim that
+  unrecognized values are safe.
+- :func:`export` and :func:`delete` act only on the managed store and perform
+  filesystem side effects only when confirmation is explicit.
+- :func:`retention_policy`, :func:`retention_check`, and :func:`providers`
+  expose the per-source policy so operators can verify data handling without
+  reading source code.
 """
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
@@ -138,8 +141,9 @@ def retention_policy(source: IngestSource) -> RetentionPolicy:
 def providers(settings: Any = None) -> list[dict[str, object]]:
     """Disclose configured sources and the embedding provider honestly.
 
-    Embedding provider details are shown only when configured; otherwise it is
-    reported as ``not_configured`` rather than silently assumed.
+    Each source reports ``configured`` when its root is set in ``settings`` and
+    ``not_configured`` otherwise. Embedding provider details are shown only when
+    configured.
     """
     result: list[dict[str, object]] = []
     for source in _SOURCES:
@@ -147,6 +151,14 @@ def providers(settings: Any = None) -> list[dict[str, object]]:
             flow = "local sqlite -> local shiyi store"
         else:
             flow = f"local {source.kind} archive -> local shiyi store"
+        configured = False
+        if settings is not None:
+            field = {
+                "sessions": "sessions_dir",
+                "hermes": "hermes_db",
+                "discord": "discord_archive_dir",
+            }[source.name]
+            configured = getattr(settings, field, None) is not None
         result.append(
             {
                 "name": source.name,
@@ -154,6 +166,7 @@ def providers(settings: Any = None) -> list[dict[str, object]]:
                 "data_flow": flow,
                 "retention_days": source.retention_days,
                 "is_local_only": source.is_local_only,
+                "status": "configured" if configured else "not_configured",
             }
         )
     embedding_provider = getattr(settings, "embedding_provider", None) if settings else None
@@ -203,9 +216,44 @@ def delete(scope: str, *, confirm: bool = False) -> None:
 # session_facts, ingestion_state). External source files are never read for
 # export or touched by delete: they exist solely as read-only provenance.
 #
-# ``session_id_prefix`` isolates a caller's rows (e.g. a test namespace or an
-# operator-selected subset); it is also the fail-closed hook for scope
-# resolution that cannot be uniquely determined.
+# Provenance is resolved from the configured source roots and the full
+# ingestion_state, yielding an explicit ScopeBinding(file_path, session_id,
+# processed_at) per scope. No caller-supplied prefix is accepted: resolution
+# must work for real absolute paths, plain discord stems, and arbitrary hermes
+# session ids.
+
+
+@dataclass(frozen=True)
+class ScopeBinding:
+    """One managed provenance binding for a scope."""
+
+    file_path: str
+    session_id: str
+    processed_at: datetime | None
+
+
+def _discover_sessions_files(root: Path) -> list[Path]:
+    """Mirror ingest.find_session_files selection rules."""
+    patterns = [
+        root / "*.jsonl",
+        root / "*.jsonl.deleted.*",
+    ]
+    raw: list[Path] = []
+    for pattern in patterns:
+        raw.extend(Path(p) for p in glob.glob(str(pattern)))
+    filtered = []
+    for f in raw:
+        basename = f.name
+        if ".trajectory.jsonl" in basename:
+            continue
+        if ".checkpoint." in basename:
+            continue
+        if ".bak" in basename:
+            continue
+        if basename.endswith(".trajectory-path.json"):
+            continue
+        filtered.append(f)
+    return filtered
 
 
 def _derive_session_id_from_path(file_path: str) -> str:
@@ -217,84 +265,125 @@ def _derive_session_id_from_path(file_path: str) -> str:
     return uuid_part
 
 
-def scope_session_ids(conn: Any, scope: str, session_id_prefix: str) -> list[str]:
-    """Resolve the managed session_ids belonging to ``scope``.
+def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
+    """Resolve the managed bindings for ``scope`` from real provenance.
 
-    Uses only existing provenance rules:
-    - sessions: ingestion_state rows whose file_path is a real path (not a
-      ``hermes://`` binding) and whose session_id derives from the basename.
-    - discord:  ingestion_state rows whose basename maps to ``discord-{stem}``.
-    - hermes:   ingestion_state rows bound by ``hermes://<session_id>``.
-
-    A scope that cannot be uniquely attributed fails closed with
-    ``scope_evidence_unavailable`` rather than guessing from ``source_type``.
+    Sessions and discord are discovered from the configured source roots using
+    the real adapter rules; hermes uses the ``hermes://`` ingestion_state
+    bindings. Symlinked or out-of-root paths are rejected. A scope that cannot
+    be uniquely attributed fails closed with ``scope_evidence_unavailable``.
     """
     if scope not in {"sessions", "discord", "hermes"}:
         raise PrivacyError(f"unknown scope: {scope}", code="unknown_scope")
-    if not session_id_prefix:
-        raise PrivacyError(
-            "scope requires a session_id prefix for isolation",
-            code="scope_evidence_unavailable",
-        )
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT file_path FROM ingestion_state "
-            "WHERE file_path LIKE %s OR file_path LIKE %s",
-            (session_id_prefix + "%", "hermes://" + session_id_prefix + "%"),
+            "SELECT file_path, processed_at FROM ingestion_state ORDER BY file_path"
         )
-        rows = [r[0] for r in cur.fetchall()]
-    if not rows:
-        raise PrivacyError(
-            f"no managed rows match scope {scope}",
-            code="scope_evidence_unavailable",
-        )
+        state_rows = {r[0]: r[1] for r in cur.fetchall()}
+    bindings: list[ScopeBinding] = []
+
     if scope == "hermes":
-        sids = []
-        for file_path in rows:
+        for file_path, processed_at in state_rows.items():
             if file_path.startswith("hermes://"):
-                sids.append(file_path[len("hermes://"):])
-        if not sids:
+                bindings.append(
+                    ScopeBinding(
+                        file_path=file_path,
+                        session_id=file_path[len("hermes://"):],
+                        processed_at=processed_at,
+                    )
+                )
+        if not bindings:
             raise PrivacyError(
                 "no hermes:// provenance binding found",
                 code="scope_evidence_unavailable",
             )
-        return sids
-    if scope == "discord":
-        sids = []
-        for file_path in rows:
-            if file_path.startswith("hermes://"):
-                continue
-            stem = os.path.splitext(os.path.basename(file_path))[0]
-            if stem.startswith("discord-"):
-                sids.append(stem)
-        if not sids:
-            raise PrivacyError(
-                "no discord-{stem} provenance found",
-                code="scope_evidence_unavailable",
-            )
-        return sids
-    # sessions: real paths, not hermes://, session_id derives from basename
-    sids = []
-    for file_path in rows:
-        if file_path.startswith("hermes://"):
-            continue
-        stem = os.path.splitext(os.path.basename(file_path))[0]
-        if stem.startswith("discord-"):
-            continue
-        sids.append(_derive_session_id_from_path(file_path))
-    if not sids:
+        return bindings
+
+    root = getattr(settings, "sessions_dir" if scope == "sessions" else "discord_archive_dir", None)
+    if root is None:
         raise PrivacyError(
-            "no sessions provenance found",
+            f"{scope} source is not configured",
+            code="source_not_configured",
+        )
+    root_path = Path(root).resolve()
+    if not root_path.is_dir():
+        raise PrivacyError(
+            f"{scope} source root does not exist",
             code="scope_evidence_unavailable",
         )
-    return sids
+    for candidate in _discover_sessions_files(root_path) if scope == "sessions" else sorted(root_path.glob("*.jsonl")):
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(root_path)
+        except ValueError:
+            raise PrivacyError(
+                f"{scope} provenance outside source root: {resolved}",
+                code="scope_evidence_unavailable",
+            )
+        if resolved.is_symlink():
+            raise PrivacyError(
+                f"{scope} provenance is a symlink: {resolved}",
+                code="scope_evidence_unavailable",
+            )
+        file_path = str(resolved)
+        if scope == "discord":
+            session_id = f"discord-{candidate.stem}"
+            if candidate.stem.startswith("discord-"):
+                session_id = candidate.stem
+        else:
+            session_id = _derive_session_id_from_path(file_path)
+        bindings.append(
+            ScopeBinding(
+                file_path=file_path,
+                session_id=session_id,
+                processed_at=state_rows.get(file_path),
+            )
+        )
+    if not bindings:
+        raise PrivacyError(
+            f"no {scope} provenance found",
+            code="scope_evidence_unavailable",
+        )
+    return bindings
+
+
+def _resolve_scopes(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
+    """Resolve one scope or the atomic union ``all``.
+
+    ``all`` resolves every configured scope and requires every one to be
+    unambiguous; any ambiguity fails the whole operation with zero side effects.
+    """
+    if scope == "all":
+        all_bindings: list[ScopeBinding] = []
+        for name in ("sessions", "discord", "hermes"):
+            try:
+                all_bindings.extend(_scope_bindings(conn, settings, name))
+            except PrivacyError as exc:
+                if exc.code == "source_not_configured":
+                    continue
+                raise
+        if not all_bindings:
+            raise PrivacyError(
+                "no configured scope has resolvable provenance",
+                code="scope_evidence_unavailable",
+            )
+        return all_bindings
+    return _scope_bindings(conn, settings, scope)
+
+
+def _session_ids(bindings: list[ScopeBinding]) -> list[str]:
+    return sorted({b.session_id for b in bindings})
+
+
+def _checkpoint_paths(bindings: list[ScopeBinding]) -> list[str]:
+    return [b.file_path for b in bindings]
 
 
 def delete_scope(
     conn: Any,
     scope: str,
-    session_id_prefix: str,
     *,
+    settings: Any,
     confirm: bool = False,
     older_than_days: int | None = None,
 ) -> dict[str, Any]:
@@ -302,12 +391,29 @@ def delete_scope(
 
     External source files are never touched. Without confirmation this is a dry
     run. Confirmed deletion is transactional: any failure rolls back all rows.
-    Repeating a confirmed delete reports zero additional deletions (idempotent).
+    Repeating a confirmed delete reports zero additional deletions.
     """
+    if older_than_days is not None and older_than_days <= 0:
+        raise PrivacyError(
+            "older_than_days must be a positive integer",
+            code="invalid_older_than",
+        )
+    bindings = _resolve_scopes(conn, settings, scope)
+    if older_than_days is not None:
+        now = datetime.now(tz=UTC)
+        kept = []
+        for b in bindings:
+            if b.processed_at is None:
+                continue
+            ts = b.processed_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=UTC)
+            if (now - ts).total_seconds() / 86400 > older_than_days:
+                kept.append(b)
+        bindings = kept
+    sids = _session_ids(bindings)
+    paths = _checkpoint_paths(bindings)
     if not confirm:
-        # Dry run: resolve and count without deleting. An empty scope is a
-        # legitimate zero-count result, not an error.
-        sids = _scope_session_ids_tolerant(conn, scope, session_id_prefix)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT count(*) FROM session_chunks WHERE session_id = ANY(%s)",
@@ -319,28 +425,28 @@ def delete_scope(
                 (sids,),
             )
             fact_count = cur.fetchone()[0]
+            cur.execute(
+                "SELECT count(*) FROM ingestion_state WHERE file_path = ANY(%s)",
+                (paths,),
+            )
+            checkpoint_count = cur.fetchone()[0]
         return {
             "dry_run": True,
             "deleted_chunks": 0,
             "deleted_facts": 0,
+            "deleted_checkpoints": 0,
             "would_delete_chunks": chunk_count,
             "would_delete_facts": fact_count,
+            "would_delete_checkpoints": checkpoint_count,
         }
-    sids = _scope_session_ids_tolerant(conn, scope, session_id_prefix)
-    before = conn.cursor()
-    before.execute("SELECT count(*) FROM session_chunks WHERE session_id = ANY(%s)", (sids,))
-    chunk_before = before.fetchone()[0]
-    before.execute("SELECT count(*) FROM session_facts WHERE session_id = ANY(%s)", (sids,))
-    fact_before = before.fetchone()[0]
-    before.close()
     try:
         cur = conn.cursor()
         cur.execute("DELETE FROM session_chunks WHERE session_id = ANY(%s)", (sids,))
+        chunk_deleted = cur.rowcount
         cur.execute("DELETE FROM session_facts WHERE session_id = ANY(%s)", (sids,))
-        cur.execute(
-            "DELETE FROM ingestion_state WHERE file_path LIKE %s OR file_path LIKE %s",
-            (session_id_prefix + "%", "hermes://" + session_id_prefix + "%"),
-        )
+        fact_deleted = cur.rowcount
+        cur.execute("DELETE FROM ingestion_state WHERE file_path = ANY(%s)", (paths,))
+        checkpoint_deleted = cur.rowcount
         conn.commit()
         cur.close()
     except Exception:
@@ -348,65 +454,72 @@ def delete_scope(
         raise
     return {
         "dry_run": False,
-        "deleted_chunks": chunk_before,
-        "deleted_facts": fact_before,
-        "would_delete_chunks": chunk_before,
-        "would_delete_facts": fact_before,
+        "deleted_chunks": chunk_deleted,
+        "deleted_facts": fact_deleted,
+        "deleted_checkpoints": checkpoint_deleted,
+        "would_delete_chunks": len(sids),
+        "would_delete_facts": 0,
+        "would_delete_checkpoints": len(paths),
     }
-
-
-def _scope_session_ids_tolerant(conn: Any, scope: str, session_id_prefix: str) -> list[str]:
-    """Like scope_session_ids but returns [] when no rows match.
-
-    Used by delete so that repeating a delete on an already-cleared scope
-    reports zero rather than failing closed.
-    """
-    try:
-        return scope_session_ids(conn, scope, session_id_prefix)
-    except PrivacyError as exc:
-        if exc.code == "scope_evidence_unavailable":
-            return []
-        raise
 
 
 def export_scope(
     conn: Any,
     scope: str,
     dest: Path | str,
-    session_id_prefix: str,
     *,
+    settings: Any,
     confirm: bool = False,
 ) -> dict[str, Any]:
     """Export minimized managed rows for ``scope`` as one deterministic JSON file.
 
     Never includes embeddings, tsvectors, secrets, DSNs, or absolute source
-    paths. Without confirmation returns a dry-run count. With confirmation the
-    file is written atomically (temp + fsync + 0600 + replace); a destination
-    with identical content returns ``already_exported``.
+    paths; public fields use session hashes, never raw session ids or paths.
+    Without confirmation returns a dry-run count. With confirmation the file is
+    written atomically (temp + fsync + 0600 + replace); a destination with
+    identical content returns ``already_exported``.
     """
-    sids = scope_session_ids(conn, scope, session_id_prefix)
+    bindings = _resolve_scopes(conn, settings, scope)
+    sids = _session_ids(bindings)
     with conn.cursor() as cur:
         cur.execute(
             "SELECT session_id, source_type, content, timestamp_start, timestamp_end "
-            "FROM session_chunks WHERE session_id = ANY(%s) ORDER BY session_id, timestamp_start",
+            "FROM session_chunks WHERE session_id = ANY(%s) "
+            "ORDER BY session_id, timestamp_start, content",
             (sids,),
         )
-        rows = [
+        chunk_rows = cur.fetchall()
+        cur.execute(
+            "SELECT session_id, category, content, \"timestamp\", task_summary "
+            "FROM session_facts WHERE session_id = ANY(%s) "
+            "ORDER BY session_id, category, \"timestamp\", content",
+            (sids,),
+        )
+        fact_rows = cur.fetchall()
+    rows = []
+    for r in chunk_rows:
+        rows.append(
             {
-                "session_id": r[0],
+                "kind": "chunk",
+                "session": hashlib.sha256((r[0] or "").encode("utf-8")).hexdigest()[:16],
                 "source_type": r[1],
                 "content": minimize(r[2]) if r[2] else "",
                 "timestamp_start": r[3].isoformat() if r[3] else None,
                 "timestamp_end": r[4].isoformat() if r[4] else None,
-                "provenance_hash": hashlib.sha256(
-                    "|".join(str(v) for v in r[:5]).encode("utf-8")
-                ).hexdigest()[:16],
             }
-            for r in cur.fetchall()
-        ]
-    payload = json.dumps(
-        {"scope": scope, "rows": rows}, ensure_ascii=False, indent=2
-    )
+        )
+    for r in fact_rows:
+        rows.append(
+            {
+                "kind": "fact",
+                "session": hashlib.sha256((r[0] or "").encode("utf-8")).hexdigest()[:16],
+                "category": r[1],
+                "content": minimize(r[2]) if r[2] else "",
+                "timestamp": r[3].isoformat() if r[3] else None,
+                "task_summary": minimize(r[4]) if r[4] else None,
+            }
+        )
+    payload = json.dumps({"scope": scope, "rows": rows}, ensure_ascii=False, indent=2)
     dest_path = Path(dest)
     if not confirm:
         return {
@@ -443,31 +556,29 @@ def export_scope(
     return {"dry_run": False, "rows": len(rows), "dest": str(dest_path), "written": True}
 
 
-def retention_check(conn: Any, scope: str, session_id_prefix: str) -> dict[str, Any]:
+def retention_check(conn: Any, scope: str, *, settings: Any) -> dict[str, Any]:
     """Report managed-data age for a scope using aware-UTC processed_at.
 
     Never reads external source file mtimes. Returns counts only.
     """
-    # Validate the scope resolves to a known provenance (fail closed otherwise).
-    scope_session_ids(conn, scope, session_id_prefix)
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT processed_at FROM ingestion_state "
-            "WHERE file_path LIKE %s OR file_path LIKE %s",
-            (session_id_prefix + "%", "hermes://" + session_id_prefix + "%"),
-        )
-        processed = [r[0] for r in cur.fetchall() if r[0] is not None]
+    bindings = _resolve_scopes(conn, settings, scope)
+    source = next((s for s in _SOURCES if s.name == scope), _SOURCES[0])
     now = datetime.now(tz=UTC)
     ages = []
-    for ts in processed:
+    for b in bindings:
+        if b.processed_at is None:
+            continue
+        ts = b.processed_at
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=UTC)
         ages.append((now - ts).total_seconds() / 86400)
-    source = next((s for s in _SOURCES if s.name == scope), _SOURCES[0])
     return {
         "scope": scope,
         "retention_days": source.retention_days,
         "total": len(ages),
         "expired": sum(1 for a in ages if a > source.retention_days),
-        "managed_data_age": {"oldest_days": max(ages) if ages else 0, "newest_days": min(ages) if ages else 0},
+        "managed_data_age": {
+            "oldest_days": max(ages) if ages else 0,
+            "newest_days": min(ages) if ages else 0,
+        },
     }

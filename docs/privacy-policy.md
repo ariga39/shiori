@@ -43,12 +43,21 @@ Privacy lifecycle operations act **only** on shiyi's own managed rows
 they are never unlinked, renamed, or rewritten by export or delete.
 
 Scope resolution reuses the existing provenance rules and fails closed with
-`scope_evidence_unavailable` when a scope cannot be uniquely attributed:
+`scope_evidence_unavailable` when a scope cannot be uniquely attributed. It
+works with real shapes — absolute source paths, plain discord stems
+(`general.jsonl` → `discord-general`), and arbitrary hermes session ids — and
+does not depend on any caller-supplied prefix:
 
-- sessions: session ids derived from the source basename,
-- discord: session ids named `discord-{stem}`,
+- sessions: files discovered under the configured sessions root using the real
+  adapter selection rules, session ids derived from the basename,
+- discord: every `*.jsonl` under the configured discord root maps to
+  `discord-{stem}`,
 - hermes: session ids bound via the `hermes://<session_id>` `ingestion_state`
   binding.
+
+`scope=all` resolves sessions, discord, and hermes atomically; if any scope
+cannot be unambiguously attributed the whole operation fails closed with zero
+side effects. Symlinked or out-of-root provenance is rejected.
 
 ## Export
 
@@ -67,15 +76,17 @@ Scope resolution reuses the existing provenance rules and fails closed with
 - `shiyi privacy delete --scope <s>` returns a dry-run count without touching
   anything.
 - With `--yes`, deletion is a single transaction that removes only the managed
-  rows bound to the selected scope; any failure rolls back all rows. Repeating
-  the delete reports zero (idempotent). `--older-than N` narrows the deletion
-  set to managed rows older than N days.
+  rows and checkpoints bound to the selected scope's resolved file paths; any
+  failure rolls back all rows. Repeating the delete reports zero (idempotent).
+  `--older-than N` narrows the deletion set to managed rows whose
+  `processed_at` is older than N days.
 - External source files are byte-for-byte unchanged before and after.
 
 ## Provider disclosure
 
 - `shiyi privacy providers` lists each source's provider endpoint, data flow,
-  retention window, and local-only status.
+  retention window, and local-only status, and reports `configured` or
+  `not_configured` for each source and for the embedding provider.
 - The embedding provider, when configured, is reported with its real endpoint
   and model; when not configured it is reported as `not_configured` rather than
   silently assumed.
