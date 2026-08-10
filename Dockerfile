@@ -1,5 +1,11 @@
 FROM pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
 
+# The optional image runs the already-initialized service as the postgres user;
+# it does not need the base image's root-only gosu handoff. Removing that
+# binary keeps the retained image free of its inherited Go runtime findings.
+RUN rm -f /usr/local/bin/gosu
+USER postgres
+
 # ⚠️ 历史遗留，未采用：live/代码/schema.sql 均不使用 pg_bigm（仅 vector + pg_trgm）。
 # 2026-08-03 起唯一主路径是 deploy/docker-compose.yml + deploy/run.sh（官方
 # pinned pgvector/pg17 镜像，无需自定义构建；compose 用 image 而非 build，故本

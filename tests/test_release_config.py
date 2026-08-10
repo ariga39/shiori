@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 AUDIT = ROOT / "tools" / "release_audit.py"
+DOCKERFILE = ROOT / "Dockerfile"
 PGVECTOR_DIGEST = "sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38"
 
 
@@ -36,6 +37,10 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert '"for-each-ref", "--format=%(refname)"' in audit
     assert 'source="commit_metadata"' in audit
     assert '"rev-parse", "--is-shallow-repository"' in audit
+
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    assert "RUN rm -f /usr/local/bin/gosu" in dockerfile
+    assert "USER postgres" in dockerfile
 
 
 def test_manifest_contains_runtime_release_references() -> None:
