@@ -85,6 +85,19 @@ def _seed(conn, settings) -> dict[str, str]:
     return {"sessions": sessions_sid1, "discord": discord_sid, "hermes": hermes_sid}
 
 
+def test_unimported_file_contributes_zero(clean_db, tmp_path):
+    """A source file with no ingestion_state checkpoint is not scope evidence."""
+    conn = clean_db
+    settings = _settings(tmp_path)
+    # abc-124.jsonl and def-999 exist on disk but have NO ingestion_state row.
+    _seed(conn, settings)
+    bindings = privacy._scope_bindings(conn, settings, "sessions")
+    sids = [b.session_id for b in bindings]
+    assert "abc-123" in sids
+    assert "abc-124" not in sids
+    assert not any(s.startswith("def-") for s in sids)
+
+
 def test_scope_sessions_resolves_from_real_absolute_path(clean_db, tmp_path):
     conn = clean_db
     settings = _settings(tmp_path)
@@ -92,7 +105,6 @@ def test_scope_sessions_resolves_from_real_absolute_path(clean_db, tmp_path):
     bindings = privacy._scope_bindings(conn, settings, "sessions")
     sids = [b.session_id for b in bindings]
     assert "abc-123" in sids
-    assert "abc-124" in sids
     assert all(not sid.startswith("discord-") for sid in sids)
 
 
@@ -110,7 +122,15 @@ def test_scope_discord_unconditional_prefix(clean_db, tmp_path):
     conn = clean_db
     settings = _settings(tmp_path)
     _seed(conn, settings)
-    (settings.discord_archive_dir / "discord-general.jsonl").write_text("x\n", encoding="utf-8")
+    double = settings.discord_archive_dir / "discord-general.jsonl"
+    double.write_text("x\n", encoding="utf-8")
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO ingestion_state (file_path, file_mtime, file_size, source_type, chunks_created) "
+            "VALUES (%s, now(), 100, 'discord', 1)",
+            (str(double),),
+        )
+        conn.commit()
     bindings = privacy._scope_bindings(conn, settings, "discord")
     sids = [b.session_id for b in bindings]
     assert "discord-discord-general" in sids
@@ -345,3 +365,57 @@ def test_export_recursively_minimizes(clean_db, tmp_path):
     text = dest.read_text(encoding="utf-8")
     assert "a@b.example" not in text
     assert "sk_live_abcdef0123456789" not in text
+
+
+def test_symlink_provenance_fails_closed(clean_db, tmp_path, monkeypatch):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    _seed(conn, settings)
+    link = settings.sessions_dir / "abc-123.jsonl"
+    link.unlink()
+    target = tmp_path / "outside.jsonl"
+    target.write_text("x\n", encoding="utf-8")
+    try:
+        os.symlink(target, link)
+    except OSError:
+        pytest.skip("symlink not permitted on this filesystem")
+    with pytest.raises(privacy.PrivacyError) as exc:
+        privacy._scope_bindings(conn, settings, "sessions")
+    assert exc.value.code == "scope_evidence_unavailable"
+
+
+def test_single_scope_rejects_cross_scope_session_conflict(clean_db, tmp_path):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    ids = _seed(conn, settings)
+    # make hermes claim the same session_id as sessions
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO ingestion_state (file_path, file_mtime, file_size, source_type, chunks_created) "
+            "VALUES (%s, now(), 100, 'main_user', 1)",
+            (f"hermes://{ids['sessions']}",),
+        )
+        conn.commit()
+    with pytest.raises(privacy.PrivacyError) as exc:
+        privacy._resolve_scopes(conn, settings, "sessions")
+    assert exc.value.code == "scope_evidence_unavailable"
+
+
+def test_export_includes_recursively_minimized_metadata(clean_db, tmp_path):
+    conn = clean_db
+    settings = _settings(tmp_path)
+    _seed(conn, settings)
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE session_chunks SET metadata = %s::jsonb WHERE session_id = %s",
+            ('{"contact": "a@b.example", "token": "sk_live_0123456789abcdef", "safe": "ok"}', "abc-123"),
+        )
+        conn.commit()
+    dest = tmp_path / "export.json"
+    privacy.export_scope(conn, "sessions", dest, settings=settings, confirm=True)
+    artifact = json.loads(dest.read_text(encoding="utf-8"))
+    meta = artifact["rows"][0]["metadata"]
+    text = json.dumps(meta)
+    assert "a@b.example" not in text
+    assert "sk_live_0123456789abcdef" not in text
+    assert "ok" in text  # safe value preserved

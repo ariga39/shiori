@@ -136,6 +136,18 @@ def _minimize_value(value: Any) -> Any:
     return value
 
 
+def _json_value(value: Any) -> Any:
+    """Return a jsonb value as plain Python objects (or None)."""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return str(value)
+
+
 def registered_sources() -> tuple[IngestSource, ...]:
     return _SOURCES
 
@@ -324,6 +336,12 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
     from .session_ids import discord_session_id
 
     for candidate in _discover_sessions_files(root_path) if scope == "sessions" else sorted(root_path.glob("*.jsonl")):
+        # Reject a symlink BEFORE dereferencing, then verify containment.
+        if candidate.is_symlink():
+            raise PrivacyError(
+                f"{scope} provenance is a symlink: {candidate}",
+                code="scope_evidence_unavailable",
+            )
         resolved = candidate.resolve()
         try:
             resolved.relative_to(root_path)
@@ -332,12 +350,12 @@ def _scope_bindings(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
                 f"{scope} provenance outside source root: {resolved}",
                 code="scope_evidence_unavailable",
             )
-        if resolved.is_symlink():
-            raise PrivacyError(
-                f"{scope} provenance is a symlink: {resolved}",
-                code="scope_evidence_unavailable",
-            )
         file_path = str(resolved)
+        # A binding is valid only when the exact file path has real
+        # ingestion_state provenance. Files that were never imported are not
+        # deletion/export evidence and contribute zero.
+        if file_path not in state_rows:
+            continue
         if scope == "discord":
             session_id = discord_session_id(candidate.stem)
         else:
@@ -393,7 +411,27 @@ def _resolve_scopes(conn: Any, settings: Any, scope: str) -> list[ScopeBinding]:
                 )
             seen_path[b.file_path] = b.session_id
         return all_bindings
-    return _scope_bindings(conn, settings, scope)
+    bindings = _scope_bindings(conn, settings, scope)
+    # A single-scope operation must still fail closed if its session ids are
+    # claimed by another enabled scope (chunks/facts key only on session_id, so
+    # deleting one scope would silently remove the other's rows).
+    claimed: dict[str, str] = {b.session_id: b.file_path for b in bindings}
+    for name in ("sessions", "discord", "hermes"):
+        if name == scope:
+            continue
+        try:
+            other = _scope_bindings(conn, settings, name)
+        except PrivacyError as exc:
+            if exc.code == "source_not_configured":
+                continue
+            raise
+        for b in other:
+            if b.session_id in claimed:
+                raise PrivacyError(
+                    f"session {b.session_id!r} is claimed by both {scope} and {name}",
+                    code="scope_evidence_unavailable",
+                )
+    return bindings
 
 
 def _session_ids(bindings: list[ScopeBinding]) -> list[str]:
@@ -523,14 +561,14 @@ def export_scope(
     sids = _session_ids(bindings)
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT id, session_id, source_type, content, timestamp_start, timestamp_end "
+            "SELECT id, session_id, source_type, content, timestamp_start, timestamp_end, metadata "
             "FROM session_chunks WHERE session_id = ANY(%s) "
             "ORDER BY session_id, timestamp_start, content, id",
             (sids,),
         )
         chunk_rows = cur.fetchall()
         cur.execute(
-            "SELECT id, session_id, category, content, \"timestamp\", task_summary "
+            "SELECT id, session_id, category, content, \"timestamp\", task_summary, metadata "
             "FROM session_facts WHERE session_id = ANY(%s) "
             "ORDER BY session_id, category, \"timestamp\", content, id",
             (sids,),
@@ -546,6 +584,7 @@ def export_scope(
                 "content": _minimize_value(r[3]),
                 "timestamp_start": r[4].isoformat() if r[4] else None,
                 "timestamp_end": r[5].isoformat() if r[5] else None,
+                "metadata": _minimize_value(_json_value(r[6])),
             }
         )
     for r in fact_rows:
@@ -557,6 +596,7 @@ def export_scope(
                 "content": _minimize_value(r[3]),
                 "timestamp": r[4].isoformat() if r[4] else None,
                 "task_summary": _minimize_value(r[5]),
+                "metadata": _minimize_value(_json_value(r[6])),
             }
         )
     payload = json.dumps({"scope": scope, "rows": rows}, ensure_ascii=False, indent=2)
