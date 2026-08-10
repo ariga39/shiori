@@ -40,24 +40,9 @@ compose_file="${repo_root}/deploy/docker-compose.yml"
 image_ref="shiyi-pgvector:local"
 
 compose=(docker compose --file "${compose_file}" --project-name "${project}")
-cleaned=false
-cleanup() {
-  status=$?
-  set +e
-  if [[ "${cleaned}" != true ]]; then
-    "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1
-    cleaned=true
-  fi
-  containers="$(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
-  networks="$(docker network ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
-  volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
-  if [[ -n "${containers}" || -n "${networks}" || -n "${volumes}" ]]; then
-    status=1
-  fi
-  exit "${status}"
-}
-trap cleanup EXIT
-
+# Configuration, identity preflight, and image build are non-destructive with
+# respect to compose resources. Do them before installing the EXIT trap so a
+# failure here cannot run down --volumes against a pre-existing project.
 "${compose[@]}" config --quiet
 existing_containers="$(docker ps -aq --filter "label=com.docker.compose.project=${project}")"
 existing_networks="$(docker network ls -q --filter "label=com.docker.compose.project=${project}")"
@@ -76,7 +61,32 @@ image_id="$(docker image inspect "${image_ref}" --format '{{.Id}}')"
   exit 1
 }
 
+# The preflight established that this project had no labeled resources. From
+# this point onward, any project resources are owned by this smoke invocation,
+# including resources partially created by a failing up command.
+created=false
+started=false
+cleaned=false
+cleanup() {
+  status=$?
+  set +e
+  if [[ "${cleaned}" != true && ( "${created}" == true || "${started}" == true ) ]]; then
+    "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1
+    cleaned=true
+  fi
+  containers="$(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
+  networks="$(docker network ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
+  volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
+  if [[ -n "${containers}" || -n "${networks}" || -n "${volumes}" ]]; then
+    status=1
+  fi
+  exit "${status}"
+}
+trap cleanup EXIT
+
+created=true
 "${compose[@]}" up --detach --force-recreate --no-deps session-memory-pg >/dev/null
+started=true
 container_id="$("${compose[@]}" ps --quiet session-memory-pg | tr -d '\r\n')"
 [[ "${container_id}" =~ ^[0-9a-f]{12,64}$ ]] || {
   echo "compose did not start exactly one database container" >&2

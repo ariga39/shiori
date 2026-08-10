@@ -74,6 +74,10 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "label=com.docker.compose.project" in runtime_smoke
     assert "com.shiyi.scope" in runtime_smoke
     assert "SHIYI_PG_DATA_DIR" not in runtime_smoke
+    assert runtime_smoke.index("existing_containers=") < runtime_smoke.index("trap cleanup EXIT")
+    assert "created=false" in runtime_smoke
+    assert "started=false" in runtime_smoke
+    assert '"${created}" == true' in runtime_smoke
     assert "CREATE EXTENSION IF NOT EXISTS vector" in runtime_smoke
     assert "SELECT count(*) FROM shiyi_container_smoke" in runtime_smoke
     assert "shared_preload_libraries=vector" in runtime_smoke
