@@ -1,4 +1,4 @@
-"""The installed ``shiyi`` command-line entry point."""
+"""The installed ``shiori`` command-line entry point."""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ def _config_args(parser: argparse.ArgumentParser, *, suppress_default: bool = Fa
         "--legacy-openclaw",
         action="store_true",
         default=argparse.SUPPRESS if suppress_default else False,
-        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIORI_* is unset",
     )
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="shiyi", description="Searchable long-term memory for AI agents")
+    parser = argparse.ArgumentParser(prog="shiori", description="Searchable long-term memory for AI agents")
     _config_args(parser)
     sub = parser.add_subparsers(dest="command", required=True)
 

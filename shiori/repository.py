@@ -1,4 +1,4 @@
-"""Repository health, version, and backup/restore contract for shiyi.
+"""Repository health, version, and backup/restore contract for shiori.
 
 Contract (@momoko 70445833):
 - ``repository_health`` distinguishes ``uninitialized / partial / current /
@@ -147,7 +147,7 @@ def require_writable(conn, *, migrations_dir: pathlib.Path | None = None) -> Non
     if health["state"] in ("drifted", "partial", "uninitialized"):
         raise MigrationError(
             "database_not_current",
-            f"database state is {health['state']}; run `shiyi db migrate` first",
+            f"database state is {health['state']}; run `shiori db migrate` first",
         )
 
 
@@ -167,7 +167,7 @@ def _pgpassword(conn) -> str:
     psycopg2 masks the password in .dsn as ``password=xxx``, so prefer the
     original URL/env DSN when present; otherwise fall back to PGPASSWORD.
     """
-    dsn = os.environ.get("SHIYI_DATABASE_DSN") or os.environ.get("SHIYI_PG_DSN") or os.environ.get("SHIYI_DATABASE_URL", "")
+    dsn = os.environ.get("SHIORI_DATABASE_DSN") or os.environ.get("SHIORI_PG_DSN") or os.environ.get("SHIORI_DATABASE_URL", "")
     if "://" in dsn:
         from urllib.parse import urlsplit
 
@@ -434,7 +434,7 @@ def restore(
 
     Refuses to restore into the current/any existing database.  Creates a new
     empty target with ``target_name``, binds a generated one-time random
-    ``marker`` in ``shiyi_restore_guard``, runs argv-only ``pg_restore``, then
+    ``marker`` in ``shiori_restore_guard``, runs argv-only ``pg_restore``, then
     migrates and verifies health.  The manifest schema head/checksum must match
     the current code head.  Returns the staging DSN for the user to switch to.
     Cleanup only ever drops the staging database this call created (identity
@@ -497,11 +497,11 @@ def restore(
                     )
                 creation_oid = int(oid_row[0])
                 cur.execute(
-                    "CREATE TABLE shiyi_restore_guard "
+                    "CREATE TABLE shiori_restore_guard "
                     "(marker text PRIMARY KEY, db_oid bigint NOT NULL)"
                 )
                 cur.execute(
-                    "INSERT INTO shiyi_restore_guard(marker, db_oid) VALUES (%s, %s)",
+                    "INSERT INTO shiori_restore_guard(marker, db_oid) VALUES (%s, %s)",
                     (marker, creation_oid),
                 )
             staging_conn.commit()
@@ -544,7 +544,7 @@ def restore(
                             "FROM pg_database WHERE datname = current_database()"
                         )
                         identity_row = cur.fetchone()
-                        cur.execute("SELECT marker, db_oid FROM shiyi_restore_guard")
+                        cur.execute("SELECT marker, db_oid FROM shiori_restore_guard")
                         guard_rows = cur.fetchall()
                     except Exception as exc:
                         raise MigrationError(
@@ -572,12 +572,12 @@ def restore(
                         cur.execute(f'SELECT count(*) FROM "{table}"')
                         count_row = cur.fetchone()
                         row_counts[table] = int(count_row[0]) if count_row else 0
-                    cur.execute("SELECT count(*) FROM shiyi_restore_guard")
+                    cur.execute("SELECT count(*) FROM shiori_restore_guard")
                     count_row = cur.fetchone()
-                    row_counts["shiyi_restore_guard"] = int(count_row[0]) if count_row else 0
+                    row_counts["shiori_restore_guard"] = int(count_row[0]) if count_row else 0
             finally:
                 staging_conn.close()
-            if row_counts.get("shiyi_restore_guard", 0) != 1:
+            if row_counts.get("shiori_restore_guard", 0) != 1:
                 raise MigrationError(
                     "restore_verification_failed",
                     "restored staging database is missing its restore marker",
@@ -609,7 +609,7 @@ def restore(
                 with check.cursor() as cur:
                     cur.execute("SELECT current_database()")
                     current_db_row = cur.fetchone()
-                    cur.execute("SELECT marker, db_oid FROM shiyi_restore_guard")
+                    cur.execute("SELECT marker, db_oid FROM shiori_restore_guard")
                     guard_rows = cur.fetchall()
                     cur.execute(
                         "SELECT oid FROM pg_database WHERE datname = %s",

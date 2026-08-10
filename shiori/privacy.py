@@ -1,4 +1,4 @@
-"""Privacy lifecycle seam for shiyi.
+"""Privacy lifecycle seam for shiori.
 
 Fail-closed contract:
 - :func:`minimize` redacts every value that matches a recognized sensitive
@@ -175,9 +175,9 @@ def providers(settings: Any = None) -> list[dict[str, object]]:
     result: list[dict[str, object]] = []
     for source in _SOURCES:
         if source.kind == "sqlite":
-            flow = "local sqlite -> local shiyi store"
+            flow = "local sqlite -> local shiori store"
         else:
-            flow = f"local {source.kind} archive -> local shiyi store"
+            flow = f"local {source.kind} archive -> local shiori store"
         configured = False
         if settings is not None:
             field = {
@@ -255,7 +255,7 @@ def delete(scope: str, *, confirm: bool = False) -> None:
 
 
 # ── Managed-store lifecycle ─────────────────────────────────────────────────
-# The functions below operate ONLY on shiyi's own managed rows (session_chunks,
+# The functions below operate ONLY on shiori's own managed rows (session_chunks,
 # session_facts, ingestion_state). External source files are never read for
 # export or touched by delete: they exist solely as read-only provenance.
 #
@@ -639,7 +639,7 @@ def export_scope(
     parent = dest_path.parent
     if not parent.exists():
         raise PrivacyError("export destination parent missing", code="export_dest_missing_parent")
-    fd, tmp_name = tempfile.mkstemp(dir=str(parent), prefix=".shiyi-export-")
+    fd, tmp_name = tempfile.mkstemp(dir=str(parent), prefix=".shiori-export-")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(payload)

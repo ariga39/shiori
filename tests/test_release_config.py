@@ -48,44 +48,44 @@ def test_ci_actions_and_container_are_pinned() -> None:
     compose = COMPOSE.read_text(encoding="utf-8")
     assert "build:" in compose
     assert "dockerfile: Dockerfile" in compose
-    assert "image: shiyi-pgvector:local" in compose
+    assert "image: shiori-pgvector:local" in compose
     assert "command:" not in compose
     assert "session-memory-pgdata:/var/lib/postgresql/data" in compose
-    assert "com.shiyi.scope: project-owned" in compose
-    assert "SHIYI_PG_DATA_DIR" not in compose
+    assert "com.shiori.scope: project-owned" in compose
+    assert "SHIORI_PG_DATA_DIR" not in compose
     workflow_container = workflow[workflow.index("  container_scan:") :]
     assert "docker build" not in workflow_container
     assert "build --pull session-memory-pg" in workflow_container
     assert "tools/container_runtime_smoke.sh --project" in workflow_container
     assert "docker compose --file deploy/docker-compose.yml" in workflow_container
-    assert "docker image inspect shiyi-pgvector:local" in workflow_container
-    assert "image-ref: shiyi-pgvector:local" in workflow_container
-    assert 'project="shiyi-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"' in workflow_container
-    assert 'echo "SHIYI_CONTAINER_PROJECT=${project}" >> "${GITHUB_ENV}"' in workflow_container
-    assert "SHIYI_PG_DATA_DIR" not in workflow_container
-    assert "SHIYI_CONTAINER_ROOT" not in workflow_container
+    assert "docker image inspect shiori-pgvector:local" in workflow_container
+    assert "image-ref: shiori-pgvector:local" in workflow_container
+    assert 'project="shiori-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"' in workflow_container
+    assert 'echo "SHIORI_CONTAINER_PROJECT=${project}" >> "${GITHUB_ENV}"' in workflow_container
+    assert "SHIORI_PG_DATA_DIR" not in workflow_container
+    assert "SHIORI_CONTAINER_ROOT" not in workflow_container
     assert "runner.temp" not in workflow_container
     assert "down --volumes --remove-orphans" in workflow_container
     run_script = RUN_SCRIPT.read_text(encoding="utf-8")
-    assert "SHIYI_COMPOSE_PROJECT" in run_script
+    assert "SHIORI_COMPOSE_PROJECT" in run_script
     assert "COMPOSE_PROJECT_NAME" in run_script
-    assert "SHIYI_PG_DATA_DIR" not in run_script
+    assert "SHIORI_PG_DATA_DIR" not in run_script
     runtime_smoke = RUNTIME_SMOKE.read_text(encoding="utf-8")
     assert "--volumes --remove-orphans" in runtime_smoke
     assert "label=com.docker.compose.project" in runtime_smoke
-    assert "com.shiyi.scope" in runtime_smoke
-    assert "SHIYI_PG_DATA_DIR" not in runtime_smoke
+    assert "com.shiori.scope" in runtime_smoke
+    assert "SHIORI_PG_DATA_DIR" not in runtime_smoke
     assert runtime_smoke.index("existing_containers=") < runtime_smoke.index("trap cleanup EXIT")
     assert "created=false" in runtime_smoke
     assert "started=false" in runtime_smoke
     assert '"${created}" == true' in runtime_smoke
     assert "CREATE EXTENSION IF NOT EXISTS vector" in runtime_smoke
-    assert "SELECT count(*) FROM shiyi_container_smoke" in runtime_smoke
+    assert "SELECT count(*) FROM shiori_container_smoke" in runtime_smoke
     assert "shared_preload_libraries=vector" in runtime_smoke
     assert "id -u" in runtime_smoke
     clean_smoke = CLEAN_SMOKE.read_text(encoding="utf-8")
-    assert 'export SHIYI_PG_CRED="${credential_file}"' in clean_smoke
-    assert 'unset SHIYI_DATABASE_DSN' in clean_smoke
+    assert 'export SHIORI_PG_CRED="${credential_file}"' in clean_smoke
+    assert 'unset SHIORI_DATABASE_DSN' in clean_smoke
     assert 'chmod 600 "${credential_file}"' in clean_smoke
 
 

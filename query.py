@@ -17,8 +17,8 @@ import numpy as np
 import psycopg2
 import requests
 
-from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
-from shiyi.embeddings import deterministic_embedding
+from shiori.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiori.embeddings import deterministic_embedding
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
 VOYAGE_MODEL = "voyage-4-large"
@@ -558,7 +558,7 @@ def main(argv=None):
     parser.add_argument(
         "--legacy-openclaw",
         action="store_true",
-        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIORI_* is unset",
     )
     args = parser.parse_args(argv)
 

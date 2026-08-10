@@ -1,4 +1,4 @@
-"""Tests for the privacy lifecycle seam (shiyi.privacy).
+"""Tests for the privacy lifecycle seam (shiori.privacy).
 
 Fail-closed contract:
 - minimize() never echoes a value it cannot positively classify as safe to keep.
@@ -18,11 +18,11 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from shiyi import privacy  # noqa: E402
+from shiori import privacy  # noqa: E402
 
 
 def test_minimize_fail_closed_redacts_pii() -> None:
-    text = "my token sk_live_1234567890abcdef lives in /home/alice/.shiyi/config.json, email a@b.example"
+    text = "my token sk_live_1234567890abcdef lives in /home/alice/.shiori/config.json, email a@b.example"
     out = privacy.minimize(text)
     assert "sk_live_1234567890abcdef" not in out
     assert "a@b.example" not in out

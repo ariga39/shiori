@@ -23,13 +23,13 @@ import psycopg2.sql
 import requests
 import tiktoken
 
-from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
-from shiyi.embeddings import deterministic_embedding
-from shiyi.privacy import minimize as privacy_minimize
+from shiori.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiori.embeddings import deterministic_embedding
+from shiori.privacy import minimize as privacy_minimize
 
 # ── Config ───────────────────────────────────────────────────────────────────
 # These compatibility constants are intentionally not data-source defaults.
-# The installable CLI configures them from SHIYI_* before production work;
+# The installable CLI configures them from SHIORI_* before production work;
 # direct legacy imports may still monkeypatch them in existing tests.
 SESSIONS_DIR = None
 PG_CRED_PATH = None
@@ -133,7 +133,7 @@ def load_credentials(path=None):
     """Load explicitly configured key/value credentials.
 
     The old implicit home-directory lookup was removed.  Callers may pass a
-    path explicitly, or set SHIYI_PG_CRED/SHIYI_DATABASE_DSN.
+    path explicitly, or set SHIORI_PG_CRED/SHIORI_DATABASE_DSN.
     """
     if path is not None:
         values = {}
@@ -526,7 +526,7 @@ def mark_file_processed(conn, filepath, mtime, size, source_type, chunks_created
 def find_session_files():
     if not SESSIONS_DIR:
         raise ConfigError(
-            "sessions source is disabled; set SHIYI_SESSIONS_DIR",
+            "sessions source is disabled; set SHIORI_SESSIONS_DIR",
             code="source_not_configured",
         )
     patterns = [
@@ -590,7 +590,7 @@ def main(argv=None):
     parser.add_argument(
         "--legacy-openclaw",
         action="store_true",
-        help="Explicit migration mode: use legacy OpenClaw paths when SHIYI_* is unset",
+        help="Explicit migration mode: use legacy OpenClaw paths when SHIORI_* is unset",
     )
     args = parser.parse_args(argv)
 
