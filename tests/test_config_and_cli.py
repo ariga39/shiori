@@ -67,6 +67,14 @@ def test_secret_and_dsn_diagnostics_are_redacted():
 
 def test_installed_cli_normalizes_key_value_pg_credentials(tmp_path: Path, monkeypatch):
     """The documented SHIYI_PG_CRED shape must reach the CLI as kwargs."""
+    for name in (
+        "SHIYI_DATABASE_DSN",
+        "SHIYI_DATABASE_URL",
+        "SHIYI_PG_DSN",
+        "SHIYI_PG_CRED",
+        "SHIYI_PG_CRED_FILE",
+    ):
+        monkeypatch.delenv(name, raising=False)
     cred_file = tmp_path / "postgres.env"
     cred_file.write_text(
         "host=127.0.0.1\nport=5432\ndbname=shiyi\nuser=alice\npassword=synthetic pass\n",
@@ -152,6 +160,14 @@ def test_pg_cred_rejects_unsafe_or_ambiguous_files(tmp_path: Path, contents: str
 
 def test_installed_cli_db_and_privacy_lifecycle_share_credential_seam(tmp_path: Path, monkeypatch):
     """All DB/privacy commands reach the connector with validated kwargs."""
+    for name in (
+        "SHIYI_DATABASE_DSN",
+        "SHIYI_DATABASE_URL",
+        "SHIYI_PG_DSN",
+        "SHIYI_PG_CRED",
+        "SHIYI_PG_CRED_FILE",
+    ):
+        monkeypatch.delenv(name, raising=False)
     cred_file = tmp_path / "postgres.env"
     cred_file.write_text(
         "host=127.0.0.1\nport=5432\ndbname=shiyi\nuser=alice\npassword=synthetic\n",
