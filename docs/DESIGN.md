@@ -64,8 +64,8 @@
                     │      │  4. 返回 top-K 片段          │
                     │      └─────────────┬───────────────┘
                      │                    │
-                     └── compose + 官方镜像 ─┘ (pgvector/pgvector:pg17)
-                       (deploy/docker-compose.yml，主路径)
+                     └── compose + 本地 pinned build ─┘ (pgvector/pg17)
+                       (project-scoped named volume，主路径)
 
    嵌入服务（外部 API）: Voyage AI — voyage-4-large, 1024 维
    （摄取用 input_type="document"，查询用 input_type="query"）
@@ -346,9 +346,9 @@ score *= decay
 
 ### 6.1 数据库与 Docker
 
-- **容器重建剧本（`deploy/docker-compose.yml` + `deploy/run.sh`）：** compose 从仓库 Dockerfile 构建 pinned `pgvector/pg17` 镜像，绑定项目本地数据目录，端口 `127.0.0.1:5433:5432`，`restart: unless-stopped`。`POSTGRES_DB/USER/PASSWORD` 不硬编码明文，由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或环境变量注入。首次启动命令：`SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d --build`。
+- **容器重建剧本（`deploy/docker-compose.yml` + `deploy/run.sh`）：** compose 从仓库 Dockerfile 构建 pinned `pgvector/pg17` 镜像，使用按 Compose project 命名空间隔离的 named volume，端口 `127.0.0.1:5433:5432`，`restart: unless-stopped`。`POSTGRES_DB/USER/PASSWORD` 不硬编码明文，由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或环境变量注入；可选的 `SHIYI_COMPOSE_PROJECT` 只用于选择本地 project 命名空间。首次启动命令：`SHIYI_PG_CRED=/secure/shiyi/postgres.env SHIYI_COMPOSE_PROJECT=shiyi-local ./deploy/run.sh up -d --build`。
 - **`shared_preload_libraries='vector'` 必须配置：** Dockerfile 的 CMD 在服务启动时预加载 vector，使 `hnsw.ef_search` GUC 在首个会话前注册；compose 不覆盖该 CMD。CI 的 runtime smoke 会检查 CMD、`SHOW shared_preload_libraries`、扩展写入、非 root uid 与重启后的数据。
-- **回滚：** 保留绑定数据目录并用当前 pinned Dockerfile 重建：`SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d --build`。不使用外部或预命名 volume，不回滚到缺少 vector preload 的旧容器。
+- **回滚与导出：** 同一 project 的 named volume 可跨容器重建保留数据；只有显式 `docker compose down --volumes` 才删除它。跨 project 或升级前使用 `shiyi db backup <path>` 与 `shiyi db restore <src> --target <newdb>`，不要复制或绑定宿主数据目录。该路径不使用外部或预命名 volume，也不回滚到缺少 vector preload 的旧容器。
 - 需在数据库中启用扩展：`pgvector`（`vector` 类型）、`pg_trgm`（query 回退用）。
 - 表结构的历史快照保留在仓库根 `schema.sql`（`session_chunks`、`ingestion_state`、扩展、索引），但运行时换库/重建统一执行 `shiyi db migrate`。完整、未登记的 legacy 结构会先做结构校验并登记初始 migration；部分或漂移结构拒绝升级。其中 `timestamp_start` / `timestamp_end` 为 **nullable**；主路径下时间戳解析失败会写入文件 mtime 兜底（`fallback_ts`），仅当 `fallback_ts=None` 时才存 `NULL`（见 §5.5）。
 - 连接信息由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或 `POSTGRES_*` 环境变量注入，格式为 `key=value`，含 `dbname` / `user` / `password`；不会读取 home-directory fallback。

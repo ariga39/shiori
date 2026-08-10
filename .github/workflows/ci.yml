@@ -251,11 +251,7 @@ jobs:
       POSTGRES_DB: shiyi_container_ci
       POSTGRES_USER: shiyi_container
       POSTGRES_PASSWORD: shiyi-ci-only
-      SHIYI_CONTAINER_PROJECT: shiyi-ci-${{ github.run_id }}-${{ github.run_attempt }}
-      SHIYI_CONTAINER_ROOT: ${{ runner.temp }}/shiyi-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}
-      SHIYI_PG_DATA_DIR: ${{ runner.temp }}/shiyi-container-smoke-${{ github.run_id }}-${{ github.run_attempt }}/data
       SHIYI_PG_PORT: 55432
-      RUNNER_TEMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
         with:
@@ -265,8 +261,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          project="shiyi-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SHIYI_CONTAINER_PROJECT=${project}" >> "${GITHUB_ENV}"
           docker compose --file deploy/docker-compose.yml \
-            --project-name "${SHIYI_CONTAINER_PROJECT}" build --pull session-memory-pg
+            --project-name "${project}" build --pull session-memory-pg
           image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}')"
           if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "compose build did not produce an immutable image id" >&2
@@ -310,5 +308,6 @@ jobs:
               exit 1
             fi
           fi
+          project="shiyi-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker compose --file deploy/docker-compose.yml \
-            --project-name "${SHIYI_CONTAINER_PROJECT}" down --volumes --remove-orphans
+            --project-name "${project}" down --volumes --remove-orphans

@@ -1,6 +1,7 @@
 # Local development PostgreSQL + pgvector. The service is built from the
 # repository Dockerfile so the runtime smoke and vulnerability scan exercise
-# the same immutable base and final image.
+# the same immutable base and final image. The data volume is project-scoped;
+# it is never external or given a shared fixed name.
 # Credentials are supplied by deploy/run.sh from an explicitly selected file or
 # by POSTGRES_* environment variables. Nothing here reads a home-directory
 # fallback or names a shared/external volume.
@@ -14,9 +15,14 @@ services:
     ports:
       - "127.0.0.1:${SHIYI_PG_PORT:-5433}:5432"
     volumes:
-      - "${SHIYI_PG_DATA_DIR:-./.data/postgres}:/var/lib/postgresql/data"
+      - session-memory-pgdata:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: "${POSTGRES_DB:?POSTGRES_DB not set — run via deploy/run.sh}"
       POSTGRES_USER: "${POSTGRES_USER:?POSTGRES_USER not set — run via deploy/run.sh}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD not set — run via deploy/run.sh}"
     restart: unless-stopped
+
+volumes:
+  session-memory-pgdata:
+    labels:
+      com.shiyi.scope: project-owned

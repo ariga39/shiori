@@ -8,7 +8,8 @@ this task.
 ## Candidate identity
 
 - Base/current main at task start: `c0e22f499602ca4331444a85e70e69faba9890af`.
-- Implementation commit before this handoff-only change:
+- Historical implementation checkpoint before the append-only hosted-driven
+  successors (not an acceptance object):
   `3b6224298b4cb1d7c1bc502045278315f259f46c`.
 - The current candidate is the append-only tip after this handoff and the
   narrow hosted-driven pgvector guard successors; its complete SHA, branch,
@@ -52,12 +53,15 @@ the verifier is packaged and covered by script-level counterexamples.
 
 The retained container delivery now has one runtime path: `deploy/docker-compose.yml`
 builds the pinned `Dockerfile` and runs its local `shiyi-pgvector:local` image;
-there is no optional-only image path. `tools/container_runtime_smoke.sh` uses a
-fresh job-owned bind directory and project name to verify empty-volume
-initialization, readiness, vector extension/write, restart persistence,
-non-root execution, inherited entrypoint/CMD and preload, and resource teardown.
-The container scan consumes the same compose-built image tag after its immutable
-image ID is recorded; the image is never pushed.
+there is no optional-only image path. The compose service uses a fresh
+project-scoped named volume, never a host bind path or external/fixed volume.
+`tools/container_runtime_smoke.sh` uses a fresh project name to verify
+empty-volume initialization, readiness, vector extension/write, restart
+persistence, non-root execution, inherited entrypoint/CMD and preload, and
+removal of only the project-labeled resources. The container scan consumes the
+same compose-built image tag after its immutable image ID is recorded; the image
+is never pushed. Portable data movement is through `shiyi db backup` and
+`shiyi db restore`, not host-directory copying.
 
 ## Evidence ledger
 
@@ -66,7 +70,7 @@ release gate.
 
 | Gate | Local candidate evidence | Hosted requirement |
 | --- | --- | --- |
-| locked install, Ruff, Pyright, unit tests | `152 passed, 101 skipped`; skips are explicit no-local-PostgreSQL classes; Ruff/Pyright/lock/compileall/diff-check clean | terminal green |
+| locked install, Ruff, Pyright, unit tests | `153 passed, 101 skipped`; skips are explicit no-local-PostgreSQL classes; Ruff/Pyright/lock/compileall/diff-check clean | terminal green |
 | PostgreSQL/pgvector, client/server major parity, vector preload, isolated DB marker/identity | not available on the author workstation | real service, no required skips |
 | fresh `shiyi db migrate`/`db health` | command is wired into CI and clean-machine smoke | terminal green |
 | legacy schema adoption and partial/drift rejection | synthetic tests and `tools/legacy_schema_upgrade_smoke.sh` | terminal green |
@@ -127,10 +131,10 @@ by construction as a fixed JSON summary with `raw_logs_uploaded=false`,
 `secret_matches=counts_only`, and one-day retention; successful runs upload no
 diagnostic artifact. No host `HOME`, ambient PostgreSQL password, user
 credential, private source path, or real document is used by the clean-machine
-harness. The container smoke likewise uses only synthetic credentials, a
-runner-temporary project/data root, and compose labels for teardown; it refuses
-to reuse an existing root and fails if compose leaves job-labeled containers,
-networks, or volumes behind.
+harness. The container smoke likewise uses only synthetic credentials and a
+fresh Compose project/name-scoped volume; it refuses to reuse an existing
+project and fails if compose leaves project-labeled containers, networks, or
+volumes behind.
 
 ## Peer and final gates
 

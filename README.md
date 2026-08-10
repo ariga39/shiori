@@ -104,21 +104,28 @@ The local deployment builds the repository `Dockerfile`, whose `pgvector/pg17`
 base is pinned to
 `sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38`.
 Compose runs that same local image; it does not pull or publish an image and
-does not use an external or pre-named Docker volume. The default data directory
-is the project-local `.data/postgres` (ignored by Git), and both the port and
-data directory can be changed with `SHIYI_PG_PORT` and
-`SHIYI_PG_DATA_DIR`.
+uses a project-scoped named volume for PostgreSQL data. The volume is neither
+external nor assigned a shared fixed name; Compose derives its name from the
+project name. Set `SHIYI_COMPOSE_PROJECT` when you need an explicit local
+namespace, and use `SHIYI_PG_PORT` to change the host port. The deployment does
+not accept a host `SHIYI_PG_DATA_DIR` bind path, because arbitrary host UID
+ownership is not portable for the non-root database image.
 
 ```bash
-SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d --build
+SHIYI_PG_CRED=/secure/shiyi/postgres.env \
+  SHIYI_COMPOSE_PROJECT=shiyi-local \
+  ./deploy/run.sh up -d --build
 shiyi db migrate        # apply forward-only migrations (recommended)
 ```
 
 The first `up` must include `--build` so the compose path exercises the pinned
-Dockerfile. The resulting container runs as the non-root `postgres` user,
-preloads `vector`, and keeps rows across a container restart. CI runs the same
-compose build/runtime smoke and scans that exact local image; it never pushes
-the image.
+Dockerfile. The named volume keeps rows across container restarts and is
+removed only when you explicitly use `docker compose down --volumes` for the
+same project. The resulting container runs as the non-root `postgres` user and
+preloads `vector`. For portable data export or migration to another project,
+use `shiyi db backup` and `shiyi db restore`; do not copy a host data directory.
+CI runs the same compose build/runtime smoke and scans that exact local image;
+it never pushes the image.
 
 Schema is managed by **forward-only migrations** (`shiyi/schema_migrations/`,
 recorded in `shiyi_schema_migrations`). Run `shiyi db migrate` on a fresh or

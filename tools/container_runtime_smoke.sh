@@ -34,31 +34,10 @@ done
 : "${POSTGRES_USER:?missing POSTGRES_USER}"
 : "${POSTGRES_PASSWORD:?missing POSTGRES_PASSWORD}"
 : "${SHIYI_PG_PORT:?missing SHIYI_PG_PORT}"
-: "${SHIYI_PG_DATA_DIR:?missing SHIYI_PG_DATA_DIR}"
-: "${SHIYI_CONTAINER_ROOT:?missing SHIYI_CONTAINER_ROOT}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/docker-compose.yml"
 image_ref="shiyi-pgvector:local"
-runner_temp="${RUNNER_TEMP:-/tmp}"
-root_dir="${SHIYI_CONTAINER_ROOT}"
-data_dir="${SHIYI_PG_DATA_DIR}"
-
-if [[ "${root_dir}" != "${runner_temp}"/shiyi-container-smoke-* ]]; then
-  echo "refusing a container smoke root outside the runner temporary namespace" >&2
-  exit 1
-fi
-if [[ "${data_dir}" != "${root_dir}/data" ]]; then
-  echo "refusing a data directory outside the job-owned smoke root" >&2
-  exit 1
-fi
-if [[ -e "${root_dir}" ]]; then
-  echo "refusing to reuse an existing container smoke root" >&2
-  exit 1
-fi
-
-mkdir -p "${data_dir}"
-printf '%s\n' "${project}" > "${root_dir}/.shiyi-container-smoke-owned"
 
 compose=(docker compose --file "${compose_file}" --project-name "${project}")
 cleaned=false
@@ -72,13 +51,7 @@ cleanup() {
   containers="$(docker ps -aq --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
   networks="$(docker network ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
   volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${project}" 2>/dev/null)"
-  if [[ "${status}" == 0 && ( -n "${containers}" || -n "${networks}" || -n "${volumes}" ) ]]; then
-    status=1
-  fi
-  if [[ -f "${root_dir}/.shiyi-container-smoke-owned" ]] &&
-    [[ "$(cat "${root_dir}/.shiyi-container-smoke-owned" 2>/dev/null)" == "${project}" ]]; then
-    rm -rf -- "${root_dir}"
-  else
+  if [[ -n "${containers}" || -n "${networks}" || -n "${volumes}" ]]; then
     status=1
   fi
   exit "${status}"
@@ -86,6 +59,13 @@ cleanup() {
 trap cleanup EXIT
 
 "${compose[@]}" config --quiet
+existing_containers="$(docker ps -aq --filter "label=com.docker.compose.project=${project}")"
+existing_networks="$(docker network ls -q --filter "label=com.docker.compose.project=${project}")"
+existing_volumes="$(docker volume ls -q --filter "label=com.docker.compose.project=${project}")"
+if [[ -n "${existing_containers}" || -n "${existing_networks}" || -n "${existing_volumes}" ]]; then
+  echo "refusing to reuse existing resources for the compose project" >&2
+  exit 1
+fi
 if [[ "${skip_build}" != true ]]; then
   "${compose[@]}" build --pull session-memory-pg
 fi
@@ -100,6 +80,16 @@ image_id="$(docker image inspect "${image_ref}" --format '{{.Id}}')"
 container_id="$("${compose[@]}" ps --quiet session-memory-pg | tr -d '\r\n')"
 [[ "${container_id}" =~ ^[0-9a-f]{12,64}$ ]] || {
   echo "compose did not start exactly one database container" >&2
+  exit 1
+}
+mapfile -t project_volumes < <(docker volume ls -q --filter "label=com.docker.compose.project=${project}")
+if (( ${#project_volumes[@]} != 1 )); then
+  echo "compose did not create exactly one project-scoped data volume" >&2
+  exit 1
+fi
+volume_scope="$(docker volume inspect --format '{{ index .Labels "com.shiyi.scope" }}' "${project_volumes[0]}")"
+[[ "${volume_scope}" == project-owned ]] || {
+  echo "data volume is missing the project-owned label" >&2
   exit 1
 }
 
