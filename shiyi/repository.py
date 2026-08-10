@@ -40,6 +40,24 @@ EXPECTED_TABLES = ("session_chunks", "ingestion_state", "session_facts")
 EXPECTED_EXTENSIONS = ("vector", "pg_trgm")
 MANIFEST_VERSION = "1"
 
+# Fixed-size blocks bound peak memory for digesting arbitrarily large dumps.
+_DIGEST_BLOCK_BYTES = 1 << 20
+
+
+def _file_digest(path: pathlib.Path, block_size: int = _DIGEST_BLOCK_BYTES) -> str:
+    """Stream a file in fixed blocks and return its first-16 hex sha256.
+
+    Never buffers the whole file in memory (disk-bounded contract).
+    """
+    hasher = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            block = fh.read(block_size)
+            if not block:
+                break
+            hasher.update(block)
+    return hasher.hexdigest()[:16]
+
 
 def _table_exists(conn, name: str) -> bool:
     with conn.cursor() as cur:
@@ -286,8 +304,7 @@ def backup(
             except OSError:
                 pass
             os.close(fd)
-        with open(dump_tmp, "rb") as fh:
-            digest = hashlib.sha256(fh.read()).hexdigest()[:16]
+        digest = _file_digest(dump_tmp)
         manifest = {
             "manifest_version": MANIFEST_VERSION,
             "format": "pg_dump-custom",
@@ -355,7 +372,7 @@ def _verify_manifest(manifest_path: pathlib.Path, dump_path: pathlib.Path) -> di
         raise MigrationError("manifest_format_unsupported", "unsupported backup format")
     if not dump_path.is_file():
         raise MigrationError("backup_missing", f"backup dump missing: {dump_path}")
-    digest = hashlib.sha256(dump_path.read_bytes()).hexdigest()[:16]
+    digest = _file_digest(dump_path)
     if manifest.get("dump_digest") != digest:
         raise MigrationError("manifest_digest_mismatch", "backup digest does not match manifest")
     return manifest

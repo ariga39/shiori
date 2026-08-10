@@ -480,3 +480,58 @@ def test_writes_rejected_for_partial_and_uninitialized(conn):
     migrate(conn, migrations_dir=MIGRATIONS_DIR)
     # after full migrate -> current -> writable
     assert repository_health(conn, migrations_dir=MIGRATIONS_DIR)["writes_rejected"] is False
+
+
+def test_digest_paths_never_use_unbounded_reads(conn, tmp_path: pathlib.Path, monkeypatch):
+    """disk-bounded contract: digesting a dump must never read the whole file
+    into memory via unbounded read()/read_bytes()."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO session_chunks (session_id, source_type, content, embedding_model) "
+            "VALUES ('s-bounded', 'main_user', 'hello', 'voyage-4-large')"
+        )
+    conn.commit()
+
+    class _BoundedReader:
+        def __init__(self, fh, binary: bool):  # noqa: ANN001
+            self._fh = fh
+            self._binary = binary
+
+        def read(self, size=-1):  # noqa: ANN001
+            if self._binary and (size is None or size < 0):
+                raise AssertionError("unbounded read() forbidden by disk-bounded contract")
+            return self._fh.read(size)
+
+        def __enter__(self):
+            self._fh.__enter__()
+            return self
+
+        def __exit__(self, *exc):  # noqa: ANN001
+            return self._fh.__exit__(*exc)
+
+        def __getattr__(self, name: str):  # noqa: ANN001
+            return getattr(self._fh, name)
+
+    _orig_path_open = pathlib.Path.open
+
+    def guarded_open(self, *args, **kwargs):  # noqa: ANN001
+        mode = kwargs.get("mode") or (args[1] if len(args) > 1 else "r")
+        raw = _orig_path_open(self, *args, **kwargs)
+        return _BoundedReader(raw, "b" in str(mode))
+
+    def guard_read_bytes(self):
+        raise AssertionError("read_bytes() forbidden by disk-bounded contract")
+
+    monkeypatch.setattr(pathlib.Path, "open", guarded_open)
+    monkeypatch.setattr(pathlib.Path, "read_bytes", guard_read_bytes)
+
+    dest = tmp_path / "bounded.dump"
+    result = backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    assert result["ok"] is True
+    assert result["digest"]
+    # verify the manifest digest path is also bounded (restore recomputes it).
+    staging = f"shiyi_staging_{os.getpid()}_bounded"
+    restore_result = restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
+    assert restore_result["ok"] is True
