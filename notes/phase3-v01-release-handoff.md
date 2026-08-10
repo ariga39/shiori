@@ -67,6 +67,13 @@ release gate.
 | reachable history/commit metadata/artifact audit | offline `release_audit.py` is wired and emits counts/object prefixes only | terminal green on a non-shallow checkout |
 | pinned container build and HIGH/CRITICAL scan | Docker unavailable locally | terminal green against the built image |
 
+At the current candidate tip, the local full suite is `153 passed, 101
+skipped`; the skips are explicit no-local-PostgreSQL classes. Ruff, Pyright,
+lock, compileall, and diff-check are clean. The local non-shallow release audit
+reports `32 reachable commits`, `328 reachable objects`, `6 refs`, `3
+artifacts`, and no blocking findings. These local results do not substitute for
+the hosted PostgreSQL, clean-install, MCP, and container gates.
+
 At the last offline verification, the workstation had no PostgreSQL/pgvector
 service and no Docker. Those capabilities therefore remain unproven locally;
 the expected `skipped` test classes must be reported by hosted CI and cannot be
