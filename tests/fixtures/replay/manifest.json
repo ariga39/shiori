@@ -1,0 +1,36 @@
+{
+  "corpus": {
+    "count": 4,
+    "input_type": "document",
+    "sha256": "baa0f3e6ceb862eb22dbe215180d45a46a91fd4eb345769f0d1e0cf8fc094f1f",
+    "version": 1
+  },
+  "generator": {
+    "library": "sentence-transformers",
+    "model": "voyageai/voyage-4-nano@main",
+    "model_id": "voyage-4-nano",
+    "name": "voyage-4-nano-offline",
+    "revision": "2026-08-11-1"
+  },
+  "model": {
+    "dimension": 1024,
+    "document_prompt": "Represent the document for retrieval:",
+    "dtype": "float32",
+    "id": "voyage-4-nano",
+    "normalized": true,
+    "query_prompt": "Represent the query for retrieving supporting documents:",
+    "revision": "voyageai/voyage-4-nano@main"
+  },
+  "queries": {
+    "count": 6,
+    "input_type": "query",
+    "sha256": "e06b1ccba3d9e88a06914471ec8f56aeb7f04f71144e4dc8aa67cbda6a299558",
+    "version": 1
+  },
+  "schema": "shiori-replay-fixture/v1",
+  "vectors": {
+    "count": 10,
+    "key_format": "input_type:sha256(text)",
+    "sha256": "09c8330d042689c08f47cf21da26391bfff5a82c9504efe305988b39ec2aad7b"
+  }
+}

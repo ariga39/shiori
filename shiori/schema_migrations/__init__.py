@@ -11,9 +11,15 @@ import pathlib
 import re
 
 
+def _schema_sql_path() -> pathlib.Path:
+    """Return the shipped legacy schema file, package-relative so both source
+    trees and installed wheels resolve it."""
+    return pathlib.Path(__file__).resolve().parents[1] / "schema.sql"
+
+
 def _structural_tables() -> set[str]:
     """Return the set of table names declared by the legacy schema.sql."""
-    schema = pathlib.Path(__file__).resolve().parents[2] / "schema.sql"
+    schema = _schema_sql_path()
     text = schema.read_text(encoding="utf-8")
     return set(re.findall(r"CREATE TABLE IF NOT EXISTS\s+([a-z_]+)", text))
 
@@ -25,7 +31,7 @@ def legacy_schema_summary() -> dict[str, object]:
     extensions: [name, ...]}`` using a light regex parse (the file uses a
     stable, hand-maintained layout).
     """
-    schema = pathlib.Path(__file__).resolve().parents[2] / "schema.sql"
+    schema = _schema_sql_path()
     text = schema.read_text(encoding="utf-8")
 
     tables: dict[str, list[str]] = {}

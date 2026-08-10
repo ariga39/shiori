@@ -251,6 +251,40 @@ def test_missing_embedding_is_structured():
         raise AssertionError("missing production embedding config must fail closed")
 
 
+def test_replay_provider_requires_manifest():
+    settings = load_config(environ={"SHIORI_EMBEDDING_PROVIDER": "replay"})
+    with pytest.raises(ConfigError) as exc:
+        settings.require_embedding()
+    assert exc.value.code == "embedding_not_configured"
+    assert "SHIORI_REPLAY_MANIFEST" in str(exc.value)
+
+
+def test_replay_provider_missing_manifest_file_fails_closed(tmp_path: Path):
+    settings = load_config(
+        environ={
+            "SHIORI_EMBEDDING_PROVIDER": "replay",
+            "SHIORI_REPLAY_MANIFEST": str(tmp_path / "missing.json"),
+        }
+    )
+    with pytest.raises(ConfigError) as exc:
+        settings.require_embedding()
+    assert exc.value.code == "replay_manifest_not_found"
+
+
+def test_replay_provider_accepts_existing_manifest(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("{}", encoding="utf-8")
+    settings = load_config(
+        environ={
+            "SHIORI_EMBEDDING_PROVIDER": "replay",
+            "SHIORI_REPLAY_MANIFEST": str(manifest),
+            "SHIORI_EMBED_DIM": "1024",
+        }
+    )
+    settings.require_embedding()
+    assert settings.replay_manifest == manifest
+
+
 def test_embedding_dimension_matches_schema():
     settings = load_config(
         environ={

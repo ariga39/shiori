@@ -6,6 +6,11 @@ include tools/release_audit.py
 include tools/verify_pgvector_image.sh
 include tools/container_runtime_smoke.sh
 include tools/check_licenses.py
-include schema.sql
+include tools/db_count.py
+include tools/e2e_replay_smoke.sh
+include tools/generate_replay_fixtures.py
+recursive-include tools/e2e-replay-sessions *.jsonl
+recursive-include tests/fixtures/replay *.jsonl *.json
+recursive-include shiori *.sql
 include THIRD_PARTY_NOTICES.md
 recursive-include docs *.md

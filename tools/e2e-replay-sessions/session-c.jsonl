@@ -1,0 +1,4 @@
+{"type":"message","message":{"role":"user","content":"The chunk size defaults to four hundred tokens with an eighty token overlap."},"timestamp":"2026-01-03T00:00:00Z"}
+{"type":"message","message":{"role":"assistant","content":"Default chunking uses a four hundred token window overlapping by eighty."},"timestamp":"2026-01-03T00:01:00Z"}
+{"type":"message","message":{"role":"user","content":"服务器将在深夜执行定期备份并验证校验和。"},"timestamp":"2026-01-03T00:02:00Z"}
+{"type":"message","message":{"role":"assistant","content":"La politique de retention conserve les donnees pendant trente jours."},"timestamp":"2026-01-03T00:03:00Z"}

@@ -17,6 +17,7 @@ import os
 import sys
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 
 import psycopg2
 import psycopg2.sql
@@ -39,6 +40,7 @@ VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
 VOYAGE_MODEL = "voyage-4-large"
 VOYAGE_KEY_PATH = None
 VOYAGE_API_KEY = None
+REPLAY_MANIFEST = None
 EMBED_DIM = 1024
 EMBEDDING_PROVIDER = "voyage"
 
@@ -71,6 +73,7 @@ def apply_settings(settings: Settings) -> None:
     """
     global SESSIONS_DIR, PG_CRED_PATH, DATABASE_DSN
     global VOYAGE_API_URL, VOYAGE_KEY_PATH, VOYAGE_API_KEY, VOYAGE_MODEL, EMBED_DIM, EMBEDDING_PROVIDER
+    global REPLAY_MANIFEST
     global CHUNK_TOKENS, CHUNK_OVERLAP, VOYAGE_BATCH_SIZE, VOYAGE_RPS_LIMIT
     global EMBED_TIMEOUT, MAX_RETRIES, ADVISORY_LOCK_ID
 
@@ -88,6 +91,8 @@ def apply_settings(settings: Settings) -> None:
         VOYAGE_API_KEY = settings.voyage_api_key
     if settings.voyage_model is not None:
         VOYAGE_MODEL = settings.voyage_model
+    if settings.replay_manifest is not None:
+        REPLAY_MANIFEST = str(settings.replay_manifest)
     if settings.embed_dim is not None:
         EMBED_DIM = settings.embed_dim
     if settings.embedding_provider is not None:
@@ -335,6 +340,22 @@ def embed_texts_with_retry(texts):
     """Embed via Voyage API. Returns (embeddings, failed_indices)."""
     if EMBEDDING_PROVIDER == "fake":
         return [deterministic_embedding(text, dimension=EMBED_DIM) for text in texts], []
+    if EMBEDDING_PROVIDER == "replay":
+        from shiori.embedding_replay import ReplayEmbedder, ReplayError
+
+        if not REPLAY_MANIFEST:
+            raise ConfigError(
+                "replay embedding provider requires SHIORI_REPLAY_MANIFEST",
+                code="replay_manifest_not_configured",
+            )
+        embedder = ReplayEmbedder.from_files(
+            Path(REPLAY_MANIFEST),
+            Path(REPLAY_MANIFEST).with_name("vectors.json"),
+        )
+        try:
+            return [embedder.embed(text, input_type="document") for text in texts], []
+        except ReplayError as exc:
+            raise ConfigError(f"replay embedding failed: {exc}", code="replay_embed_failed") from exc
     api_key = _read_voyage_key()
     all_embeddings = [None] * len(texts)
     failed_indices = []
