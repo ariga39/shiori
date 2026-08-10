@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tomllib
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
@@ -86,17 +87,67 @@ def _read_config_file(path: Path) -> dict[str, Any]:
 
 def _key_value_file(path: Path) -> dict[str, str]:
     try:
+        file_stat = path.lstat()
+    except OSError as exc:
+        raise ConfigError("database credential file is unreadable", code="credential_file_unreadable") from exc
+    mode = stat.S_IMODE(file_stat.st_mode)
+    if (
+        not stat.S_ISREG(file_stat.st_mode)
+        or path.is_symlink()
+        or mode & 0o077
+        or not mode & 0o400
+        or mode & 0o100
+    ):
+        raise ConfigError(
+            "database credential file must be a private regular file",
+            code="credential_file_permissions",
+        )
+    try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise ConfigError(f"credential file cannot be read: {path}", code="credential_file_unreadable") from exc
+        raise ConfigError("database credential file is unreadable", code="credential_file_unreadable") from exc
     values: dict[str, str] = {}
     for line in lines:
         line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        if not line or line.startswith("#"):
             continue
+        if "=" not in line:
+            raise ConfigError("database credential file contains an invalid line", code="invalid_database_config")
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
+        key = key.strip()
+        if not key or key in values:
+            raise ConfigError(
+                "database credential file contains a duplicate or empty key",
+                code="invalid_database_config",
+            )
+        values[key] = value.strip()
     return values
+
+
+def _validated_pg_credentials(values: dict[str, str]) -> dict[str, str]:
+    """Validate and return the two documented psycopg2 credential shapes."""
+    if "dsn" in values:
+        if len(values) != 1 or not values["dsn"]:
+            raise ConfigError("database credential dsn is invalid", code="invalid_database_config")
+        return {"dsn": values["dsn"]}
+
+    required = ("host", "port", "dbname", "user", "password")
+    unknown = sorted(set(values) - set(required))
+    if unknown:
+        raise ConfigError("database credential file contains an unknown key", code="invalid_database_config")
+    missing = [key for key in required if not values.get(key)]
+    if missing:
+        raise ConfigError(
+            "database credentials missing: " + ", ".join(missing),
+            code="invalid_database_config",
+        )
+    try:
+        port = int(values["port"])
+    except ValueError as exc:
+        raise ConfigError("database credential port is invalid", code="invalid_database_config") from exc
+    if not 1 <= port <= 65535:
+        raise ConfigError("database credential port is invalid", code="invalid_database_config")
+    return {**values, "port": str(port)}
 
 
 @dataclass(frozen=True)
@@ -118,6 +169,8 @@ class Settings:
     voyage_key_file: Path | None = None
     voyage_model: str | None = None
     embed_dim: int | None = None
+    allow_fake_embeddings: bool = False
+    environment: str | None = None
     log_file: Path | None = None
     chunk_tokens: int = 400
     chunk_overlap: int = 80
@@ -130,6 +183,11 @@ class Settings:
     legacy_openclaw: bool = False
 
     def __post_init__(self) -> None:
+        if self.environment is not None and self.environment not in {"development", "test", "production"}:
+            raise ConfigError(
+                "environment must be development, test, or production",
+                code="invalid_environment",
+            )
         if self.chunk_overlap >= self.chunk_tokens:
             raise ConfigError("chunk_overlap must be smaller than chunk_tokens", code="invalid_config_value")
         for name in (
@@ -202,6 +260,38 @@ class Settings:
         missing = []
         if not self.embedding_provider:
             missing.append("SHIYI_EMBEDDING_PROVIDER")
+        if self.embedding_provider == "fake":
+            if self.environment not in {"development", "test"}:
+                raise ConfigError(
+                    "fake embedding provider requires environment=development or test",
+                    code="fake_embedding_environment_required",
+                )
+            if not self.allow_fake_embeddings:
+                raise ConfigError(
+                    "fake embedding provider requires explicit local-development opt-in",
+                    code="fake_embedding_not_allowed",
+                )
+            if not self.voyage_model:
+                missing.append("SHIYI_VOYAGE_MODEL")
+            if self.embed_dim is None:
+                missing.append("SHIYI_EMBED_DIM")
+            if missing:
+                raise ConfigError(
+                    "embedding configuration is incomplete: " + ", ".join(missing),
+                    code="embedding_not_configured",
+                )
+            assert self.voyage_model is not None
+            if not self.voyage_model.startswith("shiyi-fake-"):
+                raise ConfigError(
+                    "fake embeddings require a model name in the reserved shiyi-fake-* namespace",
+                    code="fake_embedding_model_reserved",
+                )
+            if self.embed_dim != 1024:
+                raise ConfigError(
+                    "this schema requires embed_dim=1024",
+                    code="unsupported_embedding_dimension",
+                )
+            return
         if not self.voyage_api_key and not self.voyage_key_file:
             missing.append("SHIYI_VOYAGE_API_KEY or SHIYI_VOYAGE_KEY_FILE")
         elif self.voyage_key_file and not self.voyage_key_file.is_file():
@@ -214,6 +304,12 @@ class Settings:
             raise ConfigError(
                 "embedding configuration is incomplete: " + ", ".join(missing),
                 code="embedding_not_configured",
+            )
+        assert self.voyage_model is not None
+        if self.voyage_model.startswith("shiyi-fake-"):
+            raise ConfigError(
+                "the shiyi-fake-* model namespace is reserved for deterministic local vectors",
+                code="fake_embedding_model_reserved",
             )
         if self.embedding_provider != "voyage":
             raise ConfigError(
@@ -228,6 +324,11 @@ class Settings:
 
     def read_voyage_key(self) -> str:
         self.require_embedding()
+        if self.embedding_provider == "fake":
+            raise ConfigError(
+                "fake embedding provider does not use a provider key",
+                code="fake_embedding_key_unavailable",
+            )
         if self.voyage_api_key:
             # SHIYI_VOYAGE_KEY is retained as a compatibility alias.  If its
             # value names an existing file, treat it as an explicit key-file
@@ -256,7 +357,7 @@ class Settings:
         result = asdict(self)
         for key, value in list(result.items()):
             if isinstance(value, Path):
-                result[key] = str(value)
+                result[key] = "<redacted-path>"
         if result.get("voyage_api_key"):
             result["voyage_api_key"] = "<redacted>"
         if result.get("database_dsn"):
@@ -279,6 +380,8 @@ _ENV_FIELDS: dict[str, tuple[str, ...]] = {
     "voyage_key_file": ("SHIYI_VOYAGE_KEY_FILE",),
     "voyage_model": ("SHIYI_VOYAGE_MODEL",),
     "embed_dim": ("SHIYI_EMBED_DIM",),
+    "allow_fake_embeddings": ("SHIYI_ALLOW_FAKE_EMBEDDINGS",),
+    "environment": ("SHIYI_ENVIRONMENT",),
     "log_file": ("SHIYI_LOG_FILE",),
     "chunk_tokens": ("SHIYI_CHUNK_TOKENS",),
     "chunk_overlap": ("SHIYI_CHUNK_OVERLAP",),
@@ -304,6 +407,8 @@ _INT_FIELDS = {
     "discord_lock_id",
 }
 
+_BOOL_FIELDS = {"allow_fake_embeddings"}
+
 
 def _normalise_value(name: str, value: Any) -> Any:
     if name in _PATH_FIELDS:
@@ -312,7 +417,17 @@ def _normalise_value(name: str, value: Any) -> Any:
         if value is None or value == "":
             return None
         return _positive_int(value, name)
-    if name in {"database_dsn", "embedding_provider", "voyage_api_url", "voyage_api_key", "voyage_model"}:
+    if name in _BOOL_FIELDS:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "yes", "on"}:
+                return True
+            if lowered in {"0", "false", "no", "off"}:
+                return False
+        raise ConfigError(f"{name} must be a boolean", code="invalid_config_value")
+    if name in {"database_dsn", "embedding_provider", "voyage_api_url", "voyage_api_key", "voyage_model", "environment"}:
         return _text(value)
     return value
 
@@ -388,7 +503,13 @@ def redact_dsn(dsn: str) -> str:
 
 
 def credentials_from_settings(settings: Settings) -> dict[str, str]:
-    """Return explicit DB credentials, never searching ambient home files."""
+    """Return one explicit, validated psycopg2 connection shape.
+
+    A ``SHIYI_PG_CRED`` file may use either a complete ``dsn=...`` entry or
+    the documented ``host/port/dbname/user/password`` shape. The latter is
+    returned as keyword arguments so libpq performs its own safe parameter
+    handling; callers must not assume every result has a ``dsn`` key.
+    """
     if settings.database_dsn:
         return {"dsn": settings.database_dsn}
     if settings.pg_cred_file is None:
@@ -396,7 +517,24 @@ def credentials_from_settings(settings: Settings) -> dict[str, str]:
             "database is not configured; set SHIYI_DATABASE_DSN or SHIYI_PG_CRED",
             code="database_not_configured",
         )
-    return _key_value_file(settings.pg_cred_file)
+    return _validated_pg_credentials(_key_value_file(settings.pg_cred_file))
+
+
+def connect_database(settings: Settings) -> Any:
+    """Open the configured database without exposing DSNs or credentials."""
+    import psycopg2
+
+    try:
+        # psycopg2's bundled stubs model only the positional DSN overload even
+        # though the runtime accepts the documented libpq keyword parameters.
+        # Keep the validated shape explicit at our boundary and let the driver
+        # perform the actual parameter handling.
+        connect_fn: Any = psycopg2.connect
+        return connect_fn(**credentials_from_settings(settings))
+    except ConfigError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - normalize driver errors safely
+        raise ConfigError("database connection failed", code="database_connection_failed") from exc
 
 
 def config_summary(settings: Settings) -> str:

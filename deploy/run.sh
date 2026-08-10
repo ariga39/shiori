@@ -23,4 +23,12 @@ if [[ -z "$POSTGRES_DB" || -z "$POSTGRES_USER" || -z "$POSTGRES_PASSWORD" ]]; th
   exit 1
 fi
 
+if [[ -n "${SHIYI_COMPOSE_PROJECT:-}" ]]; then
+  if [[ ! "${SHIYI_COMPOSE_PROJECT}" =~ ^[a-z0-9][a-z0-9_-]{0,50}$ ]]; then
+    echo "error: SHIYI_COMPOSE_PROJECT has an invalid project name" >&2
+    exit 1
+  fi
+  export COMPOSE_PROJECT_NAME="${SHIYI_COMPOSE_PROJECT}"
+fi
+
 exec docker compose -f deploy/docker-compose.yml "$@"

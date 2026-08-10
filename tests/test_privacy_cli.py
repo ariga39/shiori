@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 
 from shiyi.cli import main
+from shiyi.config import load_config
+from shiyi.privacy import providers
 
 
 def test_privacy_providers_lists_all_sources(capsys):
@@ -12,6 +14,26 @@ def test_privacy_providers_lists_all_sources(capsys):
     out = json.loads(capsys.readouterr().out)
     names = {p["name"] for p in out}
     assert {"sessions", "hermes", "discord", "embedding"} <= names
+
+
+def test_fake_provider_disclosure_is_explicitly_local():
+    settings = load_config(
+        environ={
+            "SHIYI_EMBEDDING_PROVIDER": "fake",
+            "SHIYI_ALLOW_FAKE_EMBEDDINGS": "true",
+            "SHIYI_ENVIRONMENT": "test",
+            "SHIYI_VOYAGE_MODEL": "shiyi-fake-v1",
+            "SHIYI_EMBED_DIM": "1024",
+        }
+    )
+    embedding = next(item for item in providers(settings) if item["name"] == "embedding")
+
+    assert embedding["provider"] == "deterministic_fake"
+    assert embedding["model"] == "shiyi-fake-v1"
+    assert embedding["dimension"] == 1024
+    assert embedding["external_call"] is False
+    assert embedding["environment"] == "test"
+    assert embedding["status"] == "configured_dev_only"
 
 
 def test_privacy_export_requires_dest(capsys):
