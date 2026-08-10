@@ -535,3 +535,79 @@ def test_digest_paths_never_use_unbounded_reads(conn, tmp_path: pathlib.Path, mo
     staging = f"shiyi_staging_{os.getpid()}_bounded"
     restore_result = restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
     assert restore_result["ok"] is True
+
+
+def test_repository_health_exposes_extension_fields_and_ahead_fail_closed(conn):
+    """Mirai NO-GO fix 1: health must expose vector/pg_trgm extension flags and
+    report ahead (writes rejected) when a version exists above a zero head."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    health = repository_health(conn, migrations_dir=MIGRATIONS_DIR)
+    assert "vector_extension" in health
+    assert "pg_trgm_extension" in health
+    assert health["vector_extension"] is True
+    assert health["pg_trgm_extension"] is True
+    # Simulate head=0 with applied migrations (migrations_dir=None reads a DB
+    # that has schema version rows): must be ahead + writes rejected.
+    ahead = repository_health(conn, migrations_dir=None)
+    assert ahead["state"] == "ahead"
+    assert ahead["writes_rejected"] is True
+
+
+def test_restore_rejects_non_object_manifest(conn, tmp_path: pathlib.Path):
+    """Mirai NO-GO fix 2: valid JSON that is not an object must be a structured
+    MigrationError, never a raw TypeError/AttributeError."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "nm.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    for bad in ("null", "42", '"str"', "[1, 2]"):
+        dest.with_suffix(dest.suffix + ".manifest.json").write_text(bad, encoding="utf-8")
+        with pytest.raises(MigrationError) as exc:
+            restore(conn, dest, target_name=f"shiyi_nonobj_{abs(hash(bad)) % 100000}",
+                    migrations_dir=MIGRATIONS_DIR)
+        assert exc.value.code == "manifest_corrupt"
+
+
+def test_pg_tool_launch_oserror_is_redacted(conn, tmp_path: pathlib.Path, monkeypatch):
+    """Mirai NO-GO fix 3: PermissionError/OSError from pg_dump must become a
+    stable redacted MigrationError, not escape raw."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "oserr.dump"
+    import shiyi.repository as repo
+
+    orig = repo._connection_dsn_params
+    repo._connection_dsn_params = lambda c: {"host": "x", "port": "1", "dbname": "x", "user": "u"}
+    orig_run = repo.subprocess.run
+    try:
+        def boom(*args, **kwargs):
+            raise PermissionError(13, "Permission denied")
+        repo.subprocess.run = boom
+        with pytest.raises(MigrationError) as exc:
+            repo.backup(conn, dest, migrations_dir=MIGRATIONS_DIR, pg_dump="pg_dump")
+        assert exc.value.code == "pg_tool_failed"
+        assert "Permission denied" not in str(exc.value.message)
+        assert not dest.exists()
+    finally:
+        repo._connection_dsn_params = orig
+        repo.subprocess.run = orig_run
+
+
+def test_restore_returns_non_sensitive_row_counts(conn, tmp_path: pathlib.Path):
+    """Mirai NO-GO fix 5: restore returns a non-sensitive row-count summary."""
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO session_chunks (session_id, source_type, content, embedding_model) "
+            "VALUES ('s-rc', 'main_user', 'hello', 'voyage-4-large')"
+        )
+    conn.commit()
+    dest = tmp_path / "rc.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    staging = f"shiyi_staging_{os.getpid()}_rc"
+    result = restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
+    assert result["row_counts"]["session_chunks"] == 1
+    assert result["row_counts"]["shiyi_restore_guard"] == 1
+    assert "content" not in str(result["row_counts"])

@@ -103,7 +103,10 @@ def repository_health(conn, *, migrations_dir: pathlib.Path | None = None) -> di
                 drifted = True
                 break
 
-    if head > 0 and version > head:
+    if version > head:
+        # A DB version above the code head (including head=0 with applied
+        # migrations) is ahead and must fail closed; the applied rows are
+        # unknowable/unsupported by this code revision.
         state = "ahead"
     elif drifted:
         state = "drifted"
@@ -128,6 +131,8 @@ def repository_health(conn, *, migrations_dir: pathlib.Path | None = None) -> di
         "head": head,
         "tables": tables,
         "extensions": extensions,
+        "vector_extension": extensions.get("vector", False),
+        "pg_trgm_extension": extensions.get("pg_trgm", False),
         "missing_tables": missing,
         "missing_extensions": missing_ext,
         "writes_rejected": writes_rejected,
@@ -219,6 +224,16 @@ def _run_argv(cmd: list[str], env: dict[str, str]) -> None:
         ) from None
     except FileNotFoundError as exc:
         raise MigrationError("pg_tool_missing", f"postgres tool not found: {exc.filename}") from exc
+    except PermissionError as exc:
+        raise MigrationError(
+            "pg_tool_failed",
+            f"postgres tool not executable: {cmd[0]} (see logs; error redacted)",
+        ) from exc
+    except OSError as exc:
+        raise MigrationError(
+            "pg_tool_failed",
+            f"postgres tool failed to launch: {cmd[0]} (see logs; error redacted)",
+        ) from exc
 
 
 def _atomic_write_0600(path: pathlib.Path, data: str) -> None:
@@ -297,6 +312,16 @@ def backup(
             ) from None
         except FileNotFoundError as exc:
             raise MigrationError("pg_tool_missing", f"postgres tool not found: {exc.filename}") from exc
+        except PermissionError as exc:
+            raise MigrationError(
+                "pg_tool_failed",
+                f"postgres tool not executable: {pg_dump} (see logs; error redacted)",
+            ) from exc
+        except OSError as exc:
+            raise MigrationError(
+                "pg_tool_failed",
+                f"postgres tool failed to launch: {pg_dump} (see logs; error redacted)",
+            ) from exc
         finally:
             # fsync the fd before close so the temp file is durable.
             try:
@@ -352,6 +377,11 @@ def _verify_manifest(manifest_path: pathlib.Path, dump_path: pathlib.Path) -> di
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise MigrationError("manifest_corrupt", f"backup manifest unreadable: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise MigrationError(
+            "manifest_corrupt",
+            f"backup manifest must be a JSON object, got {type(manifest).__name__}",
+        )
     required = {
         "manifest_version",
         "format",
@@ -482,13 +512,31 @@ def restore(
             try:
                 migrate(staging_conn, migrations_dir=migrations_dir)
                 health = repository_health(staging_conn, migrations_dir=migrations_dir)
+                if not health["ok"] or health["state"] != "current":
+                    raise MigrationError(
+                        "restore_verification_failed",
+                        f"restored staging database not healthy: {health['state']}",
+                    )
+                # Non-sensitive row-count summary: verify the restored facts are
+                # present without ever exposing their contents.
+                with staging_conn.cursor() as cur:
+                    row_counts = {}
+                    for table in EXPECTED_TABLES:
+                        cur.execute(f'SELECT count(*) FROM "{table}"')
+                        count_row = cur.fetchone()
+                        row_counts[table] = int(count_row[0]) if count_row else 0
+                    cur.execute("SELECT count(*) FROM shiyi_restore_guard")
+                    count_row = cur.fetchone()
+                    row_counts["shiyi_restore_guard"] = int(count_row[0]) if count_row else 0
             finally:
                 staging_conn.close()
-            if not health["ok"] or health["state"] != "current":
+            if row_counts.get("shiyi_restore_guard", 0) != 1:
                 raise MigrationError(
                     "restore_verification_failed",
-                    f"restored staging database not healthy: {health['state']}",
+                    "restored staging database is missing its restore marker",
                 )
+        else:
+            row_counts = {}
         # Return a password-free DSN so the caller can switch to the new DB
         # without ever printing credentials.
         staging_dsn = (
@@ -499,21 +547,37 @@ def restore(
             "staging_dsn": staging_dsn,
             "marker": marker,
             "schema_head": manifest.get("schema_head"),
+            "row_counts": row_counts,
         }
     except Exception:
-        # Only drop the staging DB this call created: re-verify the marker
-        # identity first so a replaced/foreign DB is never dropped.
+        # Only drop the staging DB this call created: re-verify BOTH the marker
+        # identity and that the connected database is still the same named
+        # target we created (current_database + its OID via pg_database), so a
+        # replaced/foreign database is never dropped.
         try:
             import psycopg2 as _pg2
 
             check = _pg2.connect(staging_dsn_internal)
             try:
                 with check.cursor() as cur:
+                    cur.execute("SELECT current_database()")
+                    current_db_row = cur.fetchone()
                     cur.execute("SELECT marker FROM shiyi_restore_guard")
                     row = cur.fetchone()
+                    cur.execute(
+                        "SELECT oid FROM pg_database WHERE datname = %s",
+                        (staging_db,),
+                    )
+                    oid_row = cur.fetchone()
             finally:
                 check.close()
-            if row is not None and row[0] == marker:
+            if (
+                current_db_row is not None
+                and current_db_row[0] == staging_db
+                and oid_row is not None
+                and row is not None
+                and row[0] == marker
+            ):
                 _run_argv(
                     ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",
                      f"--username={admin['user']}", "--", staging_db],

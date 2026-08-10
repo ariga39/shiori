@@ -103,7 +103,7 @@ reports repository version/table/extension status and distinguishes
 `uninitialized / partial / current / drifted / ahead`; a database ahead of the
 code head rejects writes. `shiyi db backup <path>` writes a pg_dump file (with
 a sidecar manifest+digest) via 0600 temp + atomic rename and refuses overwrite
-or symlink targets. `shiyi db restore <src> --target <newdb> --marker <m>`
+or symlink targets. `shiyi db restore <src> --target <newdb>`
 restores into a freshly created, random-marker staging database only — it never
 overwrites the current database and returns a password-free DSN for you to
 switch to. `schema.sql` remains the legacy one-shot bootstrap reference and
