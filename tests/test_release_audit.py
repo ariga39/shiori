@@ -81,3 +81,30 @@ def test_artifact_audit_fails_closed_for_secret_shaped_output(tmp_path: Path) ->
     assert result["ok"] is False
     assert result["artifact_files"] == 1
     assert result["blocking_finding_counts"]["credential_assignment"] == 1
+
+
+def test_audit_covers_all_refs_and_commit_metadata(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--initial-branch=main")
+    _git(tmp_path, "config", "user.email", "release@example.invalid")
+    _git(tmp_path, "config", "user.name", "release-audit")
+    (tmp_path / ".gitignore").write_text(
+        ".env\n*.key\n*credentials*\n.data/\ndist/\nbuild/\n*.log\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text("main\n", encoding="utf-8")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-m", "main commit")
+
+    _git(tmp_path, "checkout", "-b", "side")
+    (tmp_path / "side.md").write_text("side\n", encoding="utf-8")
+    _git(tmp_path, "add", "side.md")
+    _git(tmp_path, "commit", "-m", "side contact=test@example.invalid")
+    _git(tmp_path, "tag", "v0.0.1")
+    _git(tmp_path, "checkout", "main")
+
+    result = release_audit.audit(tmp_path)
+
+    assert result["shallow"] is False
+    assert result["reachable_refs"] >= 3
+    assert result["reachable_commits"] >= 2
+    assert any(item["source"] == "commit_metadata" for item in result["findings"])

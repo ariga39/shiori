@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+AUDIT = ROOT / "tools" / "release_audit.py"
 PGVECTOR_DIGEST = "sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38"
 
 
@@ -28,6 +29,13 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "raw_logs_uploaded\":false" in workflow
     assert "retention-days: 1" in workflow
     assert workflow.count("fetch-depth: 0") == 2
+
+    audit = AUDIT.read_text(encoding="utf-8")
+    assert '"rev-list", "--objects", "--all"' in audit
+    assert '"rev-list", "--all"' in audit
+    assert '"for-each-ref", "--format=%(refname)"' in audit
+    assert 'source="commit_metadata"' in audit
+    assert '"rev-parse", "--is-shallow-repository"' in audit
 
 
 def test_manifest_contains_runtime_release_references() -> None:
