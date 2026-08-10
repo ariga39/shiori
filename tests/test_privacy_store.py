@@ -17,8 +17,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
 
-from shiyi import privacy  # noqa: E402
-from shiyi.config import Settings  # noqa: E402
+from shiori import privacy  # noqa: E402
+from shiori.config import Settings  # noqa: E402
 
 
 @pytest.fixture

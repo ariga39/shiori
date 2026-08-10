@@ -82,7 +82,7 @@ def _is_documented_example(category: str, match: str, *, source: str, path: str)
         }
     if category == "credential_assignment":
         value = match.split("=", 1)[-1].split(":", 1)[-1].strip().strip("\"'").lower()
-        return value in {"password", "secret", "xxx", "<redacted>", "shiyi-ci-only"} or value.startswith(("test-", "fake-", "fixture-", "example-"))
+        return value in {"password", "secret", "xxx", "<redacted>", "shiori-ci-only"} or value.startswith(("test-", "fake-", "fixture-", "example-"))
     return False
 
 
@@ -206,7 +206,7 @@ def audit(root: Path, *, artifact_dir: Path | None = None) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Offline shiyi release history and artifact audit")
+    parser = argparse.ArgumentParser(description="Offline shiori release history and artifact audit")
     parser.add_argument("--root", type=Path, default=Path.cwd())
     parser.add_argument("--artifact-dir", type=Path)
     args = parser.parse_args(argv)

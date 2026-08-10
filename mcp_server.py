@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ContentBlock
 
 import query
-from shiyi.config import ConfigError, Settings, load_config
+from shiori.config import ConfigError, Settings, load_config
 
 MAX_LIMIT = 20
 DEFAULT_LIMIT = 5
@@ -150,7 +150,7 @@ async def run_server(settings: Settings | None = None):
 def main(argv=None):
     import argparse
 
-    parser = argparse.ArgumentParser(description="shiyi read-only MCP server")
+    parser = argparse.ArgumentParser(description="shiori read-only MCP server")
     parser.add_argument("--config", help="JSON/TOML config file")
     parser.add_argument("--legacy-openclaw", action="store_true")
     args = parser.parse_args(argv)

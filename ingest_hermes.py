@@ -24,7 +24,7 @@ import sqlite3  # uv venv python (3.53.1) — WAL-reset safe
 from datetime import UTC, datetime
 
 import ingest  # reuse chunk/embed/store logic from the OpenClaw pipeline
-from shiyi.config import load_config
+from shiori.config import load_config
 
 HERMES_DB = None
 HERMES_ADVISORY_LOCK_ID = 784322
@@ -201,7 +201,7 @@ def main(argv=None):
     parser.add_argument(
         "--legacy-openclaw",
         action="store_true",
-        help="Explicit migration mode: use legacy Hermes path when SHIYI_* is unset",
+        help="Explicit migration mode: use legacy Hermes path when SHIORI_* is unset",
     )
     args = parser.parse_args(argv)
 

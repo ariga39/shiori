@@ -33,11 +33,11 @@ done
 : "${POSTGRES_DB:?missing POSTGRES_DB}"
 : "${POSTGRES_USER:?missing POSTGRES_USER}"
 : "${POSTGRES_PASSWORD:?missing POSTGRES_PASSWORD}"
-: "${SHIYI_PG_PORT:?missing SHIYI_PG_PORT}"
+: "${SHIORI_PG_PORT:?missing SHIORI_PG_PORT}"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/docker-compose.yml"
-image_ref="shiyi-pgvector:local"
+image_ref="shiori-pgvector:local"
 
 compose=(docker compose --file "${compose_file}" --project-name "${project}")
 # Configuration, identity preflight, and image build are non-destructive with
@@ -97,7 +97,7 @@ if (( ${#project_volumes[@]} != 1 )); then
   echo "compose did not create exactly one project-scoped data volume" >&2
   exit 1
 fi
-volume_scope="$(docker volume inspect --format '{{ index .Labels "com.shiyi.scope" }}' "${project_volumes[0]}")"
+volume_scope="$(docker volume inspect --format '{{ index .Labels "com.shiori.scope" }}' "${project_volumes[0]}")"
 [[ "${volume_scope}" == project-owned ]] || {
   echo "data volume is missing the project-owned label" >&2
   exit 1
@@ -151,8 +151,8 @@ grep -Eq '(^|[,[:space:]])vector([,[:space:]]|$)' <<<"${preload}" || {
   exit 1
 }
 
-psql_exec --command 'CREATE EXTENSION IF NOT EXISTS vector; CREATE TABLE shiyi_container_smoke (id integer PRIMARY KEY, embedding vector(2)); INSERT INTO shiyi_container_smoke VALUES (1, $$[1,2]$$);' >/dev/null
-count="$(psql_exec --tuples-only --no-align --command 'SELECT count(*) FROM shiyi_container_smoke;')"
+psql_exec --command 'CREATE EXTENSION IF NOT EXISTS vector; CREATE TABLE shiori_container_smoke (id integer PRIMARY KEY, embedding vector(2)); INSERT INTO shiori_container_smoke VALUES (1, $$[1,2]$$);' >/dev/null
+count="$(psql_exec --tuples-only --no-align --command 'SELECT count(*) FROM shiori_container_smoke;')"
 [[ "${count}" == 1 ]] || {
   echo "vector write smoke did not persist one row" >&2
   exit 1
@@ -178,7 +178,7 @@ uid_after_restart="$("${compose[@]}" exec --no-TTY session-memory-pg id -u | tr 
   echo "restarted database process is running as root" >&2
   exit 1
 }
-count_after_restart="$(psql_exec --tuples-only --no-align --command 'SELECT count(*) FROM shiyi_container_smoke;')"
+count_after_restart="$(psql_exec --tuples-only --no-align --command 'SELECT count(*) FROM shiori_container_smoke;')"
 [[ "${count_after_restart}" == 1 ]] || {
   echo "database row was not retained across restart" >&2
   exit 1

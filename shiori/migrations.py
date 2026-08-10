@@ -1,4 +1,4 @@
-"""Forward-only PostgreSQL migrations for shiyi.
+"""Forward-only PostgreSQL migrations for shiori.
 
 Contract (@momoko 70445833):
 - The migration table records ``version/name/checksum/applied_at``.  An applied
@@ -22,7 +22,8 @@ from dataclasses import dataclass
 from typing import cast
 
 _MIGRATION_FILE = re.compile(r"^(\d{4})_[a-z0-9_]+\.py$")
-MIGRATIONS_TABLE = "shiyi_schema_migrations"
+MIGRATIONS_TABLE = "shiori_schema_migrations"
+LEGACY_MIGRATIONS_TABLE = "shiyi_schema_migrations"
 MIGRATIONS_LOCK_KEY = 784330  # dedicated advisory lock key for schema migrations
 
 
@@ -61,6 +62,31 @@ def _load_migration(module_path: pathlib.Path):
 
 def _ensure_migrations_table(conn) -> None:
     with conn.cursor() as cur:
+        cur.execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = %s)",
+            (LEGACY_MIGRATIONS_TABLE,),
+        )
+        legacy_exists = bool(cur.fetchone()[0])
+        cur.execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = %s)",
+            (MIGRATIONS_TABLE,),
+        )
+        canonical_exists = bool(cur.fetchone()[0])
+        if legacy_exists and canonical_exists:
+            raise MigrationError(
+                "migration_table_conflict",
+                "both legacy and canonical migration ledger tables exist",
+            )
+        if legacy_exists:
+            # Data-safe forward conversion: an existing database recorded its
+            # ledger under the old table name.  Rename it in place so applied
+            # migration history is preserved exactly (checksums, versions, and
+            # timestamps are untouched).
+            cur.execute(
+                f"ALTER TABLE {LEGACY_MIGRATIONS_TABLE} RENAME TO {MIGRATIONS_TABLE}"
+            )
         cur.execute(
             f"""
             CREATE TABLE IF NOT EXISTS {MIGRATIONS_TABLE} (

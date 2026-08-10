@@ -47,12 +47,12 @@ def mock_embed(monkeypatch):
 def test_search_returns_vector_matched_content(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-vec"
-    _insert(conn, sid, "shiyi_test_alpha primary", QUERY_EMB, datetime.now(UTC))
-    _insert(conn, sid, "shiyi_test_beta secondary", FAR_EMB, datetime.now(UTC))
-    res = query.search("shiyi_test_alpha", limit=20)
+    _insert(conn, sid, "shiori_test_alpha primary", QUERY_EMB, datetime.now(UTC))
+    _insert(conn, sid, "shiori_test_beta secondary", FAR_EMB, datetime.now(UTC))
+    res = query.search("shiori_test_alpha", limit=20)
     mine = [r for r in res if r[3] == sid]
     assert mine, "expected test chunk in results"
-    assert "shiyi_test_alpha" in mine[0][0]
+    assert "shiori_test_alpha" in mine[0][0]
 
 
 def test_temporal_decay_ranks_recent_higher(db, mock_embed):
@@ -64,13 +64,13 @@ def test_temporal_decay_ranks_recent_higher(db, mock_embed):
     # old; recent chunk has a lower raw vector score (FAR_EMB, cos=0.5 to the
     # query axis; mutual cosine with old = 0.5 < 0.85 so MMR won't dedupe). Decay
     # must reverse their order: old 1.0 * 2^-4 = 0.0625 < recent 0.5 * 1.0.
-    _insert(conn, sid, "shiyi_test_old_item", QUERY_EMB, old)
-    _insert(conn, sid, "shiyi_test_new_item", FAR_EMB, now)
+    _insert(conn, sid, "shiori_test_old_item", QUERY_EMB, old)
+    _insert(conn, sid, "shiori_test_new_item", FAR_EMB, now)
     res = query.search("zzqx no-bm25-match 9", limit=300)
     mine = [r for r in res if r[3] == sid]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
-    assert contents.index("shiyi_test_new_item") < contents.index("shiyi_test_old_item")
+    assert contents.index("shiori_test_new_item") < contents.index("shiori_test_old_item")
 
 
 def test_null_ts_uses_created_at_for_decay(db, mock_embed):
@@ -79,24 +79,24 @@ def test_null_ts_uses_created_at_for_decay(db, mock_embed):
     now = datetime.now(UTC)
     old = now - timedelta(days=60)
     # Recent chunk with a real ts (FAR_EMB, cos=0.5) → score 0.5.
-    _insert(conn, sid, "shiyi_test_recent_x", FAR_EMB, now)
+    _insert(conn, sid, "shiori_test_recent_x", FAR_EMB, now)
     # Chunk with NULL ts but OLD created_at (QUERY_EMB, cos=1.0). Without decay
     # it would score a flat 1.0 and outrank the recent chunk; with created_at
     # fallback it decays by created_at: 1.0 * 2^-2 = 0.25 < 0.5.
-    _insert(conn, sid, "shiyi_test_null_old_x", QUERY_EMB, None, created_at=old)
+    _insert(conn, sid, "shiori_test_null_old_x", QUERY_EMB, None, created_at=old)
     res = query.search("zzqx no-bm25-match 5", limit=300)
     mine = [r for r in res if r[3] == sid]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
-    assert contents.index("shiyi_test_recent_x") < contents.index("shiyi_test_null_old_x")
+    assert contents.index("shiori_test_recent_x") < contents.index("shiori_test_null_old_x")
 
 
 def test_mmr_dedups_near_duplicate_embeddings(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-mmr"
     now = datetime.now(UTC)
-    _insert(conn, sid, "shiyi_test_dup_a", QUERY_EMB, now)
-    _insert(conn, sid, "shiyi_test_dup_b", QUERY_EMB, now)
+    _insert(conn, sid, "shiori_test_dup_a", QUERY_EMB, now)
+    _insert(conn, sid, "shiori_test_dup_b", QUERY_EMB, now)
     res = query.search("zzqx no-bm25-match 7", limit=20)
     mine = [r[0] for r in res if r[3] == sid]
     assert len(mine) == 1, "MMR should collapse identical-embedding chunks"
@@ -172,13 +172,13 @@ class _FailConn:
 def test_search_survives_set_failure(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-setfail"
-    _insert(conn, sid, "shiyi_test_setfail target", QUERY_EMB, datetime.now(UTC))
+    _insert(conn, sid, "shiori_test_setfail target", QUERY_EMB, datetime.now(UTC))
     monkeypatch.setattr(query, "get_db",
                         lambda: _FailConn(conn, ["SET hnsw.ef_search"]))
-    res = query.search("shiyi_test_setfail", limit=20)
+    res = query.search("shiori_test_setfail", limit=20)
     mine = [r for r in res if r[3] == sid]
     assert mine, "search must return vector results even when SET fails"
-    assert "shiyi_test_setfail" in mine[0][0]
+    assert "shiori_test_setfail" in mine[0][0]
 
 
 def test_bm25_fallback_survives_tsvector_failure(db, mock_embed, monkeypatch):
@@ -188,14 +188,14 @@ def test_bm25_fallback_survives_tsvector_failure(db, mock_embed, monkeypatch):
     # Matched chunk is FAR from the query vector (cos 0.5); the other is the
     # closest possible (cos 1.0). Without a working keyword fallback the matched
     # chunk ranks below the other; a working trigram fallback flips it on top.
-    _insert(conn, sid, "shiyi_test_match snowflake", FAR_EMB, now)
-    _insert(conn, sid, "shiyi_test_other", QUERY_EMB, now)
+    _insert(conn, sid, "shiori_test_match snowflake", FAR_EMB, now)
+    _insert(conn, sid, "shiori_test_other", QUERY_EMB, now)
     monkeypatch.setattr(query, "get_db",
                         lambda: _FailConn(conn, ["ts_rank_cd"]))
     res = query.search("snowflake", limit=300)
     mine = [r for r in res if r[3] == sid]
     contents = [r[0] for r in mine]
-    assert contents.index("shiyi_test_match snowflake") < contents.index("shiyi_test_other"), \
+    assert contents.index("shiori_test_match snowflake") < contents.index("shiori_test_other"), \
         "trigram fallback must still return results after a tsvector failure"
 
 
@@ -223,13 +223,13 @@ def test_double_null_uses_null_ts_prior(db, mock_embed):
     # ~1.0; the double-NULL chunk (QUERY_EMB, cos 1.0, no ts AND no created_at)
     # must be scaled by NULL_TS_PRIOR (0.25) so it ranks BELOW the recent chunk.
     # Without the prior it would have the higher pre-decay score and rank above.
-    _insert(conn, sid, "shiyi_test_dn_recent zzqxmarker", FAR_EMB, now)
-    _insert_double_null(conn, sid, "shiyi_test_dn_null zzqxmarker", QUERY_EMB)
+    _insert(conn, sid, "shiori_test_dn_recent zzqxmarker", FAR_EMB, now)
+    _insert_double_null(conn, sid, "shiori_test_dn_null zzqxmarker", QUERY_EMB)
     res = query.search("zzqxmarker", limit=300)
     mine = [r for r in res if r[3] == sid]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
-    assert contents.index("shiyi_test_dn_recent zzqxmarker") < contents.index("shiyi_test_dn_null zzqxmarker")
+    assert contents.index("shiori_test_dn_recent zzqxmarker") < contents.index("shiori_test_dn_null zzqxmarker")
 
 
 # ── Cycle 6: ef_search clamp (pgvector preload now active) ─────────────────
@@ -243,12 +243,12 @@ def test_double_null_uses_null_ts_prior(db, mock_embed):
 def test_ef_search_clamped_to_1000_for_large_limit(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-efclamp"
-    _insert(conn, sid, "shiyi_test_efclamp target", QUERY_EMB, datetime.now(UTC))
+    _insert(conn, sid, "shiori_test_efclamp target", QUERY_EMB, datetime.now(UTC))
     # Reuse _FailConn with no failing substrings: it forwards to the real DB but
     # its close() is a no-op, so the fixture still owns `conn` for inspection.
     monkeypatch.setattr(query, "get_db", lambda: _FailConn(conn, []))
     # limit=250 -> pool=1250, which must be clamped to 1000 (not SET as 1250).
-    res = query.search("shiyi_test_efclamp", limit=250)
+    res = query.search("shiori_test_efclamp", limit=250)
     mine = [r for r in res if r[3] == sid]
     assert mine, "search with limit>200 must still return results (no rollback to ef=40)"
     cur = conn.cursor()
@@ -260,10 +260,10 @@ def test_ef_search_clamped_to_1000_for_large_limit(db, mock_embed, monkeypatch):
 def test_ef_search_equals_pool_for_small_limit(db, mock_embed, monkeypatch):
     conn, prefix = db
     sid = prefix + "-efsmall"
-    _insert(conn, sid, "shiyi_test_efsmall target", QUERY_EMB, datetime.now(UTC))
+    _insert(conn, sid, "shiori_test_efsmall target", QUERY_EMB, datetime.now(UTC))
     monkeypatch.setattr(query, "get_db", lambda: _FailConn(conn, []))
     # limit=45 -> pool=225 (>= 200 floor, < 1000 cap) -> ef_search stays = pool.
-    res = query.search("shiyi_test_efsmall", limit=45)
+    res = query.search("shiori_test_efsmall", limit=45)
     mine = [r for r in res if r[3] == sid]
     assert mine
     cur = conn.cursor()
@@ -319,7 +319,7 @@ def test_short_name_exact_substring_recalled(db, mock_embed):
     # Content containing the entity name, but vector-distant from the query emb.
     _insert(conn, sid, "日和拿到权限后开了 HF_XET 第三次尝试,跑得很顺", FAR_EMB, now)
     # A decoy that is vector-close but does NOT contain the name.
-    _insert(conn, sid, "shiyi_test_alpha primary unrelated topic", QUERY_EMB, now)
+    _insert(conn, sid, "shiori_test_alpha primary unrelated topic", QUERY_EMB, now)
 
     res = query.search("日和", limit=10)
     mine = [r for r in res if r[3] == sid]

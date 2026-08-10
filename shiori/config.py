@@ -1,11 +1,16 @@
-"""Typed, explicit configuration for shiyi.
+"""Typed, explicit configuration for shiori.
 
 Configuration precedence is deliberately boring and observable:
 
 1. values passed directly to :func:`load_config`;
-2. ``SHIYI_*`` environment variables;
+2. ``SHIORI_*`` environment variables;
 3. an explicitly selected JSON/TOML config file;
 4. safe non-secret defaults (chunking and retry limits only).
+
+Legacy ``SHIYI_*`` environment variables and ``[shiyi]`` config sections are
+accepted as compatible inputs for one migration cycle.  Setting both a
+canonical ``SHIORI_*``/``[shiori]`` value and its legacy alias for the same
+field fails closed; it is never silently resolved.
 
 Data-source paths, database credentials, and embedding provider settings have
 no implicit OpenClaw/Hermes/Discord defaults.  The old paths are available
@@ -79,9 +84,21 @@ def _read_config_file(path: Path) -> dict[str, Any]:
 
     if not isinstance(data, dict):
         raise ConfigError("config file root must be an object", code="invalid_config_file")
-    section = data.get("shiyi", data)
+    has_canonical = isinstance(data.get("shiori"), dict)
+    has_legacy = isinstance(data.get("shiyi"), dict)
+    if has_canonical and has_legacy:
+        raise ConfigError(
+            "config file must not define both [shiori] and [shiyi] sections",
+            code="config_section_conflict",
+        )
+    if has_canonical:
+        section = data["shiori"]
+    elif has_legacy:
+        section = data["shiyi"]
+    else:
+        section = data
     if not isinstance(section, dict):
-        raise ConfigError("[shiyi] config section must be an object", code="invalid_config_file")
+        raise ConfigError("[shiori] config section must be an object", code="invalid_config_file")
     return dict(section)
 
 
@@ -233,7 +250,7 @@ class Settings:
         value = getattr(self, field)
         if value is None:
             raise ConfigError(
-                f"{source} source is disabled; configure SHIYI_{field.upper()}",
+                f"{source} source is disabled; configure SHIORI_{field.upper()}",
                 code="source_not_configured",
             )
         if not value.exists():
@@ -252,14 +269,14 @@ class Settings:
                 raise ConfigError("database credential file does not exist", code="credential_file_not_found")
             return self.pg_cred_file
         raise ConfigError(
-            "database is not configured; set SHIYI_DATABASE_DSN or SHIYI_PG_CRED",
+            "database is not configured; set SHIORI_DATABASE_DSN or SHIORI_PG_CRED",
             code="database_not_configured",
         )
 
     def require_embedding(self) -> None:
         missing = []
         if not self.embedding_provider:
-            missing.append("SHIYI_EMBEDDING_PROVIDER")
+            missing.append("SHIORI_EMBEDDING_PROVIDER")
         if self.embedding_provider == "fake":
             if self.environment not in {"development", "test"}:
                 raise ConfigError(
@@ -272,18 +289,18 @@ class Settings:
                     code="fake_embedding_not_allowed",
                 )
             if not self.voyage_model:
-                missing.append("SHIYI_VOYAGE_MODEL")
+                missing.append("SHIORI_VOYAGE_MODEL")
             if self.embed_dim is None:
-                missing.append("SHIYI_EMBED_DIM")
+                missing.append("SHIORI_EMBED_DIM")
             if missing:
                 raise ConfigError(
                     "embedding configuration is incomplete: " + ", ".join(missing),
                     code="embedding_not_configured",
                 )
             assert self.voyage_model is not None
-            if not self.voyage_model.startswith("shiyi-fake-"):
+            if not (self.voyage_model.startswith("shiori-fake-") or self.voyage_model.startswith("shiyi-fake-")):
                 raise ConfigError(
-                    "fake embeddings require a model name in the reserved shiyi-fake-* namespace",
+                    "fake embeddings require a model name in the reserved shiori-fake-* namespace",
                     code="fake_embedding_model_reserved",
                 )
             if self.embed_dim != 1024:
@@ -293,22 +310,22 @@ class Settings:
                 )
             return
         if not self.voyage_api_key and not self.voyage_key_file:
-            missing.append("SHIYI_VOYAGE_API_KEY or SHIYI_VOYAGE_KEY_FILE")
+            missing.append("SHIORI_VOYAGE_API_KEY or SHIORI_VOYAGE_KEY_FILE")
         elif self.voyage_key_file and not self.voyage_key_file.is_file():
             raise ConfigError("Voyage key file does not exist", code="key_file_not_found")
         if not self.voyage_model:
-            missing.append("SHIYI_VOYAGE_MODEL")
+            missing.append("SHIORI_VOYAGE_MODEL")
         if self.embed_dim is None:
-            missing.append("SHIYI_EMBED_DIM")
+            missing.append("SHIORI_EMBED_DIM")
         if missing:
             raise ConfigError(
                 "embedding configuration is incomplete: " + ", ".join(missing),
                 code="embedding_not_configured",
             )
         assert self.voyage_model is not None
-        if self.voyage_model.startswith("shiyi-fake-"):
+        if self.voyage_model.startswith("shiyi-fake-") or self.voyage_model.startswith("shiori-fake-"):
             raise ConfigError(
-                "the shiyi-fake-* model namespace is reserved for deterministic local vectors",
+                "the shiori-fake-* model namespace is reserved for deterministic local vectors",
                 code="fake_embedding_model_reserved",
             )
         if self.embedding_provider != "voyage":
@@ -330,7 +347,7 @@ class Settings:
                 code="fake_embedding_key_unavailable",
             )
         if self.voyage_api_key:
-            # SHIYI_VOYAGE_KEY is retained as a compatibility alias.  If its
+            # SHIORI_VOYAGE_KEY is the canonical name.  If its
             # value names an existing file, treat it as an explicit key-file
             # reference; otherwise it is an injected key value.
             candidate = Path(self.voyage_api_key).expanduser()
@@ -369,6 +386,35 @@ Config = Settings
 
 
 _ENV_FIELDS: dict[str, tuple[str, ...]] = {
+    "sessions_dir": ("SHIORI_SESSIONS_DIR",),
+    "hermes_db": ("SHIORI_HERMES_DB",),
+    "discord_archive_dir": ("SHIORI_DISCORD_ARCHIVE_DIR",),
+    "database_dsn": ("SHIORI_DATABASE_DSN", "SHIORI_DATABASE_URL", "SHIORI_PG_DSN"),
+    "pg_cred_file": ("SHIORI_PG_CRED", "SHIORI_PG_CRED_FILE"),
+    "embedding_provider": ("SHIORI_EMBEDDING_PROVIDER",),
+    "voyage_api_url": ("SHIORI_VOYAGE_API_URL",),
+    "voyage_api_key": ("SHIORI_VOYAGE_API_KEY", "SHIORI_VOYAGE_KEY"),
+    "voyage_key_file": ("SHIORI_VOYAGE_KEY_FILE",),
+    "voyage_model": ("SHIORI_VOYAGE_MODEL",),
+    "embed_dim": ("SHIORI_EMBED_DIM",),
+    "allow_fake_embeddings": ("SHIORI_ALLOW_FAKE_EMBEDDINGS",),
+    "environment": ("SHIORI_ENVIRONMENT",),
+    "log_file": ("SHIORI_LOG_FILE",),
+    "chunk_tokens": ("SHIORI_CHUNK_TOKENS",),
+    "chunk_overlap": ("SHIORI_CHUNK_OVERLAP",),
+    "voyage_batch_size": ("SHIORI_VOYAGE_BATCH_SIZE",),
+    "voyage_rps_limit": ("SHIORI_VOYAGE_RPS_LIMIT",),
+    "embed_timeout": ("SHIORI_EMBED_TIMEOUT",),
+    "max_retries": ("SHIORI_MAX_RETRIES",),
+    "sessions_lock_id": ("SHIORI_SESSIONS_LOCK_ID",),
+    "discord_lock_id": ("SHIORI_DISCORD_LOCK_ID",),
+}
+
+# Legacy aliases for one migration cycle.  Each field maps to the legacy
+# ``SHIYI_*`` variable that used to be canonical.  If both a canonical
+# ``SHIORI_*`` variable and its legacy alias are set for the same field,
+# configuration fails closed instead of guessing which one wins.
+_LEGACY_ENV_FIELDS: dict[str, tuple[str, ...]] = {
     "sessions_dir": ("SHIYI_SESSIONS_DIR",),
     "hermes_db": ("SHIYI_HERMES_DB",),
     "discord_archive_dir": ("SHIYI_DISCORD_ARCHIVE_DIR",),
@@ -456,7 +502,17 @@ def load_config(
 ) -> Settings:
     """Load settings with explicit values taking precedence over env/file."""
     env = dict(os.environ if environ is None else environ)
-    selected_path = config_path or env.get("SHIYI_CONFIG_FILE")
+    canonical_config_file = env.get("SHIORI_CONFIG_FILE", "")
+    legacy_config_file = env.get("SHIYI_CONFIG_FILE", "")
+    if config_path is None:
+        if canonical_config_file and legacy_config_file:
+            raise ConfigError(
+                "both SHIORI_CONFIG_FILE and SHIYI_CONFIG_FILE are set",
+                code="config_file_conflict",
+            )
+        selected_path = canonical_config_file or legacy_config_file
+    else:
+        selected_path = config_path
     values: dict[str, Any] = {}
     if selected_path:
         values.update(_read_config_file(Path(selected_path).expanduser()))
@@ -465,6 +521,23 @@ def load_config(
         for env_name in env_names:
             if env_name in env and env[env_name] != "":
                 values[field_name] = env[env_name]
+                break
+
+    # Legacy ``SHIYI_*`` variables are accepted as compatible inputs for one
+    # migration cycle.  A field set through both a canonical ``SHIORI_*`` name
+    # and its legacy alias fails closed; the two are never merged or guessed.
+    for field_name, legacy_names in _LEGACY_ENV_FIELDS.items():
+        if field_name in values:
+            for legacy_name in legacy_names:
+                if legacy_name in env and env[legacy_name] != "":
+                    raise ConfigError(
+                        f"both {_ENV_FIELDS[field_name][0]} and {legacy_name} are set",
+                        code="env_alias_conflict",
+                    )
+            continue
+        for legacy_name in legacy_names:
+            if legacy_name in env and env[legacy_name] != "":
+                values[field_name] = env[legacy_name]
                 break
 
     # Explicit keyword values are the highest-priority layer.  This also lets
@@ -505,7 +578,7 @@ def redact_dsn(dsn: str) -> str:
 def credentials_from_settings(settings: Settings) -> dict[str, str]:
     """Return one explicit, validated psycopg2 connection shape.
 
-    A ``SHIYI_PG_CRED`` file may use either a complete ``dsn=...`` entry or
+    A ``SHIORI_PG_CRED`` file may use either a complete ``dsn=...`` entry or
     the documented ``host/port/dbname/user/password`` shape. The latter is
     returned as keyword arguments so libpq performs its own safe parameter
     handling; callers must not assume every result has a ``dsn`` key.
@@ -514,7 +587,7 @@ def credentials_from_settings(settings: Settings) -> dict[str, str]:
         return {"dsn": settings.database_dsn}
     if settings.pg_cred_file is None:
         raise ConfigError(
-            "database is not configured; set SHIYI_DATABASE_DSN or SHIYI_PG_CRED",
+            "database is not configured; set SHIORI_DATABASE_DSN or SHIORI_PG_CRED",
             code="database_not_configured",
         )
     return _validated_pg_credentials(_key_value_file(settings.pg_cred_file))
