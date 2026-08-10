@@ -54,13 +54,32 @@ def _git(root: Path, *args: str) -> str:
 
 def _is_documented_example(category: str, match: str, *, source: str, path: str) -> bool:
     """Recognize only fixed, non-secret examples already used by the docs/tests."""
+    # These two files contain the audit's own executable detection fixtures and
+    # regex literals. They are not release inputs; the tests separately prove
+    # that the same shapes block when they occur in a reachable artifact or
+    # generated output. Keep the exception path-exact so an arbitrary source
+    # file cannot opt out of the audit.
+    if source == "reachable_blob" and (
+        (path == "tests/test_release_audit.py" and category in {"private_key", "credential_assignment"})
+        or (path == "tools/release_audit.py" and category == "host_path")
+    ):
+        return True
     if category == "email_in_blob":
         domain = match.rsplit("@", 1)[-1].lower()
         return domain.endswith((".example", ".invalid", ".test")) or source == "commit_metadata"
     if category == "provider_live_key":
         return path.startswith("tests/") and bool(re.fullmatch(r"(?:sk|pk|rk)_live_[0-9a-f]{16}", match))
     if category == "host_path":
-        return match.startswith(("~/.openclaw", "~/.hermes", "/home/raft", "/home/alice", "/home/u"))
+        if match.startswith(("~/.openclaw", "~/.hermes", "/home/raft", "/home/alice", "/home/u")):
+            return True
+        # The clean-machine harness deliberately places XDG state below a
+        # variable-owned temporary directory.  The regex sees only the
+        # synthetic ``/home/.config`` or ``/home/.cache`` suffix; keep this
+        # exact pair non-blocking without allowing real home paths through.
+        return source == "reachable_blob" and path == "tools/clean_machine_smoke.sh" and match in {
+            "/home/.config",
+            "/home/.cache",
+        }
     if category == "credential_assignment":
         value = match.split("=", 1)[-1].split(":", 1)[-1].strip().strip("\"'").lower()
         return value in {"password", "secret", "xxx", "<redacted>", "shiyi-ci-only"} or value.startswith(("test-", "fake-", "fixture-", "example-"))

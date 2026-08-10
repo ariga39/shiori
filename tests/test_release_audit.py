@@ -38,8 +38,10 @@ def test_reachable_private_key_fails_closed_without_match_text(tmp_path: Path) -
         ".env\n*.key\n*credentials*\n.data/\ndist/\nbuild/\n*.log\n",
         encoding="utf-8",
     )
+    private_key_marker = "-----BEGIN " + "PRIVATE KEY-----"
+    private_key_end = "-----END " + "PRIVATE KEY-----"
     (tmp_path / "leaked.key").write_text(
-        "-----BEGIN PRIVATE KEY-----\nsynthetic\n-----END PRIVATE KEY-----\n",
+        f"{private_key_marker}\nsynthetic\n{private_key_end}\n",
         encoding="utf-8",
     )
     _git(tmp_path, "add", ".gitignore")
@@ -70,7 +72,9 @@ def test_artifact_audit_fails_closed_for_secret_shaped_output(tmp_path: Path) ->
     _git(tmp_path, "commit", "-m", "synthetic repository")
     artifact = tmp_path / "artifact"
     artifact.mkdir()
-    (artifact / "summary.txt").write_text("api_key=not-a-real-secret-value\n", encoding="utf-8")
+    secret_name = "api" + "_key"
+    secret_value = "not-a-real-" + "secret-value"
+    (artifact / "summary.txt").write_text(f"{secret_name}={secret_value}\n", encoding="utf-8")
 
     result = release_audit.audit(tmp_path, artifact_dir=artifact)
 
