@@ -157,15 +157,11 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
     import json as _json
     from pathlib import Path
 
-    import psycopg2
-
-    from .config import credentials_from_settings
+    from .config import connect_database
     from .migrations import MigrationError, migrate, schema_version
     from .repository import backup, repository_health, restore
 
-    creds = credentials_from_settings(settings)
-    dsn = creds["dsn"]
-    conn = psycopg2.connect(dsn)
+    conn = connect_database(settings)
     try:
         if args.db_command == "health":
             from pathlib import Path as _Path
@@ -219,11 +215,9 @@ def _run_privacy(args: argparse.Namespace, settings: Settings) -> int:
         print(_json.dumps(providers(settings), sort_keys=True, ensure_ascii=False))
         return 0
     # export/delete/retention-check operate on the managed store, so they need a DB.
-    import psycopg2
+    from .config import connect_database
 
-    from .config import credentials_from_settings
-
-    conn = psycopg2.connect(credentials_from_settings(settings)["dsn"])
+    conn = connect_database(settings)
     try:
         if args.privacy_command == "export":
             result = export_scope(

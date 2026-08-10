@@ -10,7 +10,7 @@ The supported installation is a normal Python package. Python 3.11–3.13 is
 supported; `uv` is used in this repository for reproducible development.
 
 ```bash
-uv sync --extra dev
+uv sync --locked --extra dev
 uv run shiyi --help
 ```
 
@@ -49,6 +49,23 @@ Instead of putting a key in the environment, set
 an explicit `SHIYI_PG_CRED` key/value file. Diagnostics redact API keys and
 DSN passwords.
 
+For an isolated local or CI smoke run only, the provider can be explicitly
+replaced by deterministic local vectors. This is opt-in and never sends
+content over the network:
+
+```bash
+export SHIYI_EMBEDDING_PROVIDER=fake
+export SHIYI_ALLOW_FAKE_EMBEDDINGS=true
+export SHIYI_ENVIRONMENT=development
+export SHIYI_VOYAGE_MODEL=shiyi-fake-v1
+export SHIYI_EMBED_DIM=1024
+```
+
+The fake model must use the reserved `shiyi-fake-*` namespace. Search filters
+both model and vector dimension, and production rejects that namespace, so
+fake and Voyage vectors cannot be silently mixed. Do not use the fake provider
+for production data or performance evaluation.
+
 The old OpenClaw/Hermes paths are available only with the explicit
 `--legacy-openclaw` migration switch. That switch is for a deliberate,
 temporary migration and does not change the default configuration.
@@ -83,17 +100,32 @@ use the installed `shiyi` command.
 
 ## PostgreSQL + pgvector
 
-The local deployment uses the official `pgvector/pgvector:pg17` image. It
-does not use an external or pre-named Docker volume. The default data directory
-is the project-local `.data/postgres` (ignored by Git), and both the port and
-data directory can be changed with `SHIYI_PG_PORT` and
-`SHIYI_PG_DATA_DIR`.
+The local deployment builds the repository `Dockerfile`, whose `pgvector/pg17`
+base is pinned to
+`sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38`.
+Compose runs that same local image; it does not pull or publish an image and
+uses a project-scoped named volume for PostgreSQL data. The volume is neither
+external nor assigned a shared fixed name; Compose derives its name from the
+project name. Set `SHIYI_COMPOSE_PROJECT` when you need an explicit local
+namespace, and use `SHIYI_PG_PORT` to change the host port. The deployment does
+not accept a host `SHIYI_PG_DATA_DIR` bind path, because arbitrary host UID
+ownership is not portable for the non-root database image.
 
 ```bash
-SHIYI_PG_CRED=/secure/shiyi/postgres.env ./deploy/run.sh up -d
+SHIYI_PG_CRED=/secure/shiyi/postgres.env \
+  SHIYI_COMPOSE_PROJECT=shiyi-local \
+  ./deploy/run.sh up -d --build
 shiyi db migrate        # apply forward-only migrations (recommended)
-psql -h 127.0.0.1 -p 5433 -U <user> -d <db> -f schema.sql   # legacy bootstrap
 ```
+
+The first `up` must include `--build` so the compose path exercises the pinned
+Dockerfile. The named volume keeps rows across container restarts and is
+removed only when you explicitly use `docker compose down --volumes` for the
+same project. The resulting container runs as the non-root `postgres` user and
+preloads `vector`. For portable data export or migration to another project,
+use `shiyi db backup` and `shiyi db restore`; do not copy a host data directory.
+CI runs the same compose build/runtime smoke and scans that exact local image;
+it never pushes the image.
 
 Schema is managed by **forward-only migrations** (`shiyi/schema_migrations/`,
 recorded in `shiyi_schema_migrations`). Run `shiyi db migrate` on a fresh or
@@ -106,8 +138,12 @@ a sidecar manifest+digest) via 0600 temp + atomic rename and refuses overwrite
 or symlink targets. `shiyi db restore <src> --target <newdb>`
 restores into a freshly created, random-marker staging database only — it never
 overwrites the current database and returns a password-free DSN for you to
-switch to. `schema.sql` remains the legacy one-shot bootstrap reference and
-does not repair drift on existing databases.
+switch to. `schema.sql` remains a legacy one-shot bootstrap reference. When an
+existing database has the complete canonical legacy structure, `shiyi db
+migrate` verifies it and records the initial migration without replaying DDL;
+partial or drifted legacy structures fail closed. New installations and
+upgrades use the CLI migration command above. CI separately exercises the
+legacy bootstrap-to-head path in an isolated database.
 
 The credential file is explicit `key=value` data with `dbname`, `user`, and
 `password` entries. `deploy/run.sh` never prints its contents and does not
@@ -127,7 +163,10 @@ SHIYI_TEST_DATABASE_MARKER
 When enabled, the test fixture verifies both the connected database name and
 a marker row before any test cleanup. It deletes only rows in its own reserved
 `test-<run-id>` namespace. CI creates a random database and marker on its
-ephemeral PostgreSQL service, applies `schema.sql`, and runs the same suite.
+ephemeral PostgreSQL service, applies the checked-in migrations through
+`shiyi db migrate`, runs the same suite, and separately upgrades a synthetic
+`schema.sql` database through the same CLI command. The legacy fixture is
+never used as a shortcut for the fresh-database path.
 Embedding unit tests use deterministic synthetic vectors; production never
 selects a fake provider implicitly.
 
@@ -136,6 +175,37 @@ uv run ruff check .
 uv run pyright
 uv run pytest -q
 ```
+
+The repository also carries a clean-machine lifecycle harness. Hosted CI runs
+the exact installed-wheel commands for migration, health, three synthetic
+source adapters, fake-provider search, privacy export/delete, backup/restore,
+and the real MCP stdio boundary; it uses a fresh temporary `HOME` and an
+isolated PostgreSQL database. The harness is synthetic and does not read host
+credentials or real source data:
+
+```bash
+SHIYI_TEST_DATABASE_MARKER=ci-local-1-1-1 \
+  tools/clean_machine_smoke.sh --cli /path/to/venv/bin/shiyi \
+  --python /path/to/venv/bin/python \
+  --dsn postgresql://user@127.0.0.1:5432/shiyi_test \
+  --database-name shiyi_test --workdir /tmp/shiyi-smoke
+```
+
+Release evidence is separated into these gates:
+
+| Gate | Local | Hosted CI | Not executed locally |
+| --- | --- | --- | --- |
+| locked install, lint, type, unit tests | proven when the commands above pass | required | — |
+| PostgreSQL/pgvector migrations and lifecycle | requires an explicitly isolated database | required | if no local database is provided |
+| dependency vulnerability audit | `uv export --locked` + pinned `pip-audit` | required | — |
+| reachable history/artifact secret and PII audit | `uv run python tools/release_audit.py` | required | — |
+| pinned Docker build and HIGH/CRITICAL scan | requires Docker | required | when Docker is unavailable |
+
+The private release candidate is not a public release: CI does not create a
+tag, publish a package, push an image, deploy, register an external service,
+or change repository visibility.
+The complete gate list and known limitations are recorded in
+`docs/RELEASE_CHECKLIST.md`.
 
 ## Search behavior
 

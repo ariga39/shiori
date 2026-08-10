@@ -19,6 +19,7 @@ import importlib.util
 import pathlib
 import re
 from dataclasses import dataclass
+from typing import cast
 
 _MIGRATION_FILE = re.compile(r"^(\d{4})_[a-z0-9_]+\.py$")
 MIGRATIONS_TABLE = "shiyi_schema_migrations"
@@ -120,6 +121,42 @@ def code_head(migrations_dir: pathlib.Path) -> int:
     return max(available, default=0)
 
 
+def _legacy_schema_state(conn) -> str:
+    """Classify an unversioned database before applying migration 0001.
+
+    ``schema.sql`` predates the migration ledger and is still a supported
+    upgrade input.  A complete structural match can safely be adopted into
+    the ledger; a partial or drifted legacy schema must not be handed to the
+    initial migration, whose DDL intentionally has no overwrite semantics.
+    """
+    from .schema_migrations import legacy_schema_summary, migrated_db_summary
+
+    expected = legacy_schema_summary()
+    actual = migrated_db_summary(conn)
+    expected_table_columns = cast(dict[str, list[str]], expected["tables"])
+    actual_table_columns = cast(dict[str, list[str]], actual["tables"])
+    expected_tables = set(expected_table_columns)
+    actual_tables = set(actual_table_columns)
+    if not actual_tables:
+        return "empty"
+    if actual_tables != expected_tables:
+        return "unrecognized"
+    for table in expected_tables:
+        expected_columns = set(expected_table_columns[table])
+        actual_columns = set(actual_table_columns[table])
+        if actual_columns != expected_columns:
+            return "unrecognized"
+    expected_indexes = cast(list[str], expected["indexes"])
+    actual_indexes = cast(list[str], actual["indexes"])
+    if not set(expected_indexes) <= set(actual_indexes):
+        return "unrecognized"
+    expected_extensions = cast(list[str], expected["extensions"])
+    actual_extensions = cast(list[str], actual["extensions"])
+    if not set(expected_extensions) <= set(actual_extensions):
+        return "unrecognized"
+    return "ready"
+
+
 def schema_version(conn) -> int:
     """Highest applied migration version (0 if table missing/empty)."""
     _ensure_migrations_table(conn)
@@ -161,6 +198,36 @@ def migrate(
             ordered = [(v, path) for v, path in ordered if v <= target]
 
         applied_names: list[str] = []
+        # An old database created by schema.sql has the canonical tables but
+        # no migration ledger.  Adopt it only after an exact structural
+        # check; never rerun the initial CREATE TABLE statements over user
+        # data, and never guess when the old schema is partial or drifted.
+        if not applied and ordered and ordered[0][0] == 1:
+            legacy_state = _legacy_schema_state(conn)
+            if legacy_state == "unrecognized":
+                raise MigrationError(
+                    "legacy_schema_unrecognized",
+                    "unversioned database schema is not the supported legacy schema",
+                    version=1,
+                )
+            if legacy_state == "ready":
+                version, (name, path) = ordered[0]
+                text = path.read_text(encoding="utf-8")
+                checksum = _checksum(text)
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"INSERT INTO {MIGRATIONS_TABLE} (version, name, checksum) "
+                        "VALUES (%s, %s, %s)",
+                        (version, name, checksum),
+                    )
+                conn.commit()
+                applied[version] = AppliedMigration(
+                    version=version,
+                    name=name,
+                    checksum=checksum,
+                    applied_at="legacy-adopted",
+                )
+                applied_names.append(name)
         for version, (name, path) in ordered:
             prior = applied.get(version)
             text = path.read_text(encoding="utf-8")

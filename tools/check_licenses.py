@@ -15,6 +15,7 @@ EXPECTED: dict[str, tuple[str, ...]] = {
     "tiktoken": ("MIT",),
     "pytest": ("MIT",),
     "ruff": ("MIT",),
+    "pip-audit": ("Apache-2.0", "Apache Software License"),
 }
 
 LOCK_FILE = Path(__file__).resolve().parents[1] / "uv.lock"
@@ -39,7 +40,13 @@ def _declared_license(package: str) -> str:
         raise RuntimeError(f"{package} is not installed") from exc
     expressions = info.get_all("License-Expression") or []
     legacy = info.get_all("License") or []
-    values = [value.strip() for value in [*expressions, *legacy] if value and value.strip()]
+    classifiers = info.get_all("Classifier") or []
+    license_classifiers = [
+        value.split("::", 2)[-1].strip()
+        for value in classifiers
+        if value.startswith("License :: OSI Approved ::")
+    ]
+    values = [value.strip() for value in [*expressions, *legacy, *license_classifiers] if value and value.strip()]
     if not values:
         raise RuntimeError(f"{package} has no declared license metadata")
     return " | ".join(values)

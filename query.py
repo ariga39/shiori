@@ -18,11 +18,13 @@ import psycopg2
 import requests
 
 from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiyi.embeddings import deterministic_embedding
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
 VOYAGE_MODEL = "voyage-4-large"
 VOYAGE_KEY_PATH = None
 VOYAGE_API_KEY = None
+EMBEDDING_PROVIDER = "voyage"
 PG_CRED_PATH = None
 DATABASE_DSN = None
 
@@ -152,7 +154,7 @@ def _unpack_search_row(row: tuple[Any, ...]) -> tuple[Any, ...]:
 
 
 def apply_settings(settings: Settings) -> None:
-    global VOYAGE_API_URL, VOYAGE_MODEL, VOYAGE_KEY_PATH, VOYAGE_API_KEY
+    global VOYAGE_API_URL, VOYAGE_MODEL, VOYAGE_KEY_PATH, VOYAGE_API_KEY, EMBEDDING_PROVIDER
     global PG_CRED_PATH, DATABASE_DSN, EMBED_DIM
     if settings.voyage_api_url is not None:
         VOYAGE_API_URL = settings.voyage_api_url
@@ -166,6 +168,8 @@ def apply_settings(settings: Settings) -> None:
         PG_CRED_PATH = str(settings.pg_cred_file)
     if settings.database_dsn is not None:
         DATABASE_DSN = settings.database_dsn
+    if settings.embedding_provider is not None:
+        EMBEDDING_PROVIDER = settings.embedding_provider
     EMBED_DIM = settings.embed_dim if settings.embed_dim is not None else DEFAULT_EMBED_DIM
 
 
@@ -239,6 +243,8 @@ def get_db():
 
 def embed_query(text):
     text = _validate_query_text(text)
+    if EMBEDDING_PROVIDER == "fake":
+        return deterministic_embedding(text, dimension=EMBED_DIM)
     api_key = _read_voyage_key()
     try:
         resp = requests.post(

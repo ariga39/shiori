@@ -15,6 +15,7 @@ full notices and bundled-code terms.
 | tiktoken | 0.13.0 | MIT |
 | pytest (development) | 8.4.2 | MIT |
 | ruff (development) | 0.16.2 | MIT |
+| pip-audit (development/security gate) | 2.9.0 | Apache Software License |
 
 The pinned metadata is checked without network access:
 
