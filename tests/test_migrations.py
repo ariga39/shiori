@@ -254,6 +254,42 @@ def test_0001_equivalent_to_schema_sql(conn):
     assert set(expected["extensions"]) <= set(actual["extensions"])
 
 
+def test_legacy_schema_bootstrap_is_adopted_before_migration(conn):
+    """A real schema.sql database upgrades without replaying destructive DDL."""
+    _reset_schema(conn)
+    schema = pathlib.Path(__file__).resolve().parents[1] / "schema.sql"
+    with conn.cursor() as cur:
+        cur.execute(schema.read_text(encoding="utf-8"))
+        cur.execute(
+            "INSERT INTO session_chunks (session_id, source_type, content, embedding_model) "
+            "VALUES ('legacy-upgrade', 'main_user', 'kept', 'voyage-4-large')"
+        )
+    conn.commit()
+
+    applied = migrate(conn, migrations_dir=MIGRATIONS_DIR)
+
+    assert applied == ["0001_initial"]
+    assert schema_version(conn) == code_head(MIGRATIONS_DIR)
+    assert repository_health(conn, migrations_dir=MIGRATIONS_DIR)["state"] == "current"
+    with conn.cursor() as cur:
+        cur.execute("SELECT content FROM session_chunks WHERE session_id='legacy-upgrade'")
+        assert cur.fetchone()[0] == "kept"
+
+
+def test_partial_legacy_schema_fails_closed_without_adoption(conn):
+    """A partial schema.sql replay is never guessed into the migration ledger."""
+    _reset_schema(conn)
+    with conn.cursor() as cur:
+        cur.execute("CREATE TABLE session_chunks (id uuid PRIMARY KEY)")
+    conn.commit()
+
+    with pytest.raises(MigrationError) as exc:
+        migrate(conn, migrations_dir=MIGRATIONS_DIR)
+
+    assert exc.value.code == "legacy_schema_unrecognized"
+    assert schema_version(conn) == 0
+
+
 def test_restore_refuses_nonempty_target(conn, tmp_path: pathlib.Path):
     """Restore refuses to touch an existing/non-empty database: it creates a
     fresh staging DB and would collide, so a target that already exists fails

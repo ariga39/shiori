@@ -168,6 +168,10 @@ def providers(settings: Any = None) -> list[dict[str, object]]:
     ``not_configured`` otherwise. Embedding provider details are shown only when
     configured.
     """
+    if settings is not None and getattr(settings, "embedding_provider", None) == "fake":
+        # Disclosure must not become a side door around the fake provider's
+        # environment/opt-in gate.
+        settings.require_embedding()
     result: list[dict[str, object]] = []
     for source in _SOURCES:
         if source.kind == "sqlite":
@@ -193,7 +197,23 @@ def providers(settings: Any = None) -> list[dict[str, object]]:
             }
         )
     embedding_provider = getattr(settings, "embedding_provider", None) if settings else None
-    if embedding_provider:
+    if embedding_provider == "fake":
+        result.append(
+            {
+                "name": "embedding",
+                "endpoint": "local://deterministic-fake",
+                "provider": "deterministic_fake",
+                "model": getattr(settings, "voyage_model", "") or "unknown",
+                "dimension": getattr(settings, "embed_dim", None),
+                "data_flow": "local content -> local deterministic test vector",
+                "retention_days": 0,
+                "is_local_only": True,
+                "external_call": False,
+                "environment": getattr(settings, "environment", None),
+                "status": "configured_dev_only",
+            }
+        )
+    elif embedding_provider:
         result.append(
             {
                 "name": "embedding",

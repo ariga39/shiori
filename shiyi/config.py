@@ -118,6 +118,8 @@ class Settings:
     voyage_key_file: Path | None = None
     voyage_model: str | None = None
     embed_dim: int | None = None
+    allow_fake_embeddings: bool = False
+    environment: str | None = None
     log_file: Path | None = None
     chunk_tokens: int = 400
     chunk_overlap: int = 80
@@ -130,6 +132,11 @@ class Settings:
     legacy_openclaw: bool = False
 
     def __post_init__(self) -> None:
+        if self.environment is not None and self.environment not in {"development", "test", "production"}:
+            raise ConfigError(
+                "environment must be development, test, or production",
+                code="invalid_environment",
+            )
         if self.chunk_overlap >= self.chunk_tokens:
             raise ConfigError("chunk_overlap must be smaller than chunk_tokens", code="invalid_config_value")
         for name in (
@@ -202,6 +209,38 @@ class Settings:
         missing = []
         if not self.embedding_provider:
             missing.append("SHIYI_EMBEDDING_PROVIDER")
+        if self.embedding_provider == "fake":
+            if self.environment not in {"development", "test"}:
+                raise ConfigError(
+                    "fake embedding provider requires environment=development or test",
+                    code="fake_embedding_environment_required",
+                )
+            if not self.allow_fake_embeddings:
+                raise ConfigError(
+                    "fake embedding provider requires explicit local-development opt-in",
+                    code="fake_embedding_not_allowed",
+                )
+            if not self.voyage_model:
+                missing.append("SHIYI_VOYAGE_MODEL")
+            if self.embed_dim is None:
+                missing.append("SHIYI_EMBED_DIM")
+            if missing:
+                raise ConfigError(
+                    "embedding configuration is incomplete: " + ", ".join(missing),
+                    code="embedding_not_configured",
+                )
+            assert self.voyage_model is not None
+            if not self.voyage_model.startswith("shiyi-fake-"):
+                raise ConfigError(
+                    "fake embeddings require a model name in the reserved shiyi-fake-* namespace",
+                    code="fake_embedding_model_reserved",
+                )
+            if self.embed_dim != 1024:
+                raise ConfigError(
+                    "this schema requires embed_dim=1024",
+                    code="unsupported_embedding_dimension",
+                )
+            return
         if not self.voyage_api_key and not self.voyage_key_file:
             missing.append("SHIYI_VOYAGE_API_KEY or SHIYI_VOYAGE_KEY_FILE")
         elif self.voyage_key_file and not self.voyage_key_file.is_file():
@@ -214,6 +253,12 @@ class Settings:
             raise ConfigError(
                 "embedding configuration is incomplete: " + ", ".join(missing),
                 code="embedding_not_configured",
+            )
+        assert self.voyage_model is not None
+        if self.voyage_model.startswith("shiyi-fake-"):
+            raise ConfigError(
+                "the shiyi-fake-* model namespace is reserved for deterministic local vectors",
+                code="fake_embedding_model_reserved",
             )
         if self.embedding_provider != "voyage":
             raise ConfigError(
@@ -228,6 +273,11 @@ class Settings:
 
     def read_voyage_key(self) -> str:
         self.require_embedding()
+        if self.embedding_provider == "fake":
+            raise ConfigError(
+                "fake embedding provider does not use a provider key",
+                code="fake_embedding_key_unavailable",
+            )
         if self.voyage_api_key:
             # SHIYI_VOYAGE_KEY is retained as a compatibility alias.  If its
             # value names an existing file, treat it as an explicit key-file
@@ -279,6 +329,8 @@ _ENV_FIELDS: dict[str, tuple[str, ...]] = {
     "voyage_key_file": ("SHIYI_VOYAGE_KEY_FILE",),
     "voyage_model": ("SHIYI_VOYAGE_MODEL",),
     "embed_dim": ("SHIYI_EMBED_DIM",),
+    "allow_fake_embeddings": ("SHIYI_ALLOW_FAKE_EMBEDDINGS",),
+    "environment": ("SHIYI_ENVIRONMENT",),
     "log_file": ("SHIYI_LOG_FILE",),
     "chunk_tokens": ("SHIYI_CHUNK_TOKENS",),
     "chunk_overlap": ("SHIYI_CHUNK_OVERLAP",),
@@ -304,6 +356,8 @@ _INT_FIELDS = {
     "discord_lock_id",
 }
 
+_BOOL_FIELDS = {"allow_fake_embeddings"}
+
 
 def _normalise_value(name: str, value: Any) -> Any:
     if name in _PATH_FIELDS:
@@ -312,7 +366,17 @@ def _normalise_value(name: str, value: Any) -> Any:
         if value is None or value == "":
             return None
         return _positive_int(value, name)
-    if name in {"database_dsn", "embedding_provider", "voyage_api_url", "voyage_api_key", "voyage_model"}:
+    if name in _BOOL_FIELDS:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "yes", "on"}:
+                return True
+            if lowered in {"0", "false", "no", "off"}:
+                return False
+        raise ConfigError(f"{name} must be a boolean", code="invalid_config_value")
+    if name in {"database_dsn", "embedding_provider", "voyage_api_url", "voyage_api_key", "voyage_model", "environment"}:
         return _text(value)
     return value
 

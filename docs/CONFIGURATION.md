@@ -66,8 +66,23 @@ The current PostgreSQL schema is `vector(1024)`, so `SHIYI_EMBED_DIM` must be
 `1024` until a schema migration adds another dimension.
 
 Tests use deterministic in-memory vectors and never use a production key.
-There is no implicit fake provider: `fake`, missing provider, missing key,
-missing model, and missing dimension are rejected by the production preflight.
+There is no implicit fake provider. An isolated local/CI smoke run may opt in
+explicitly with all of the following settings; this provider never performs a
+network request and is rejected unless the opt-in flag is true:
+
+```text
+SHIYI_EMBEDDING_PROVIDER=fake
+SHIYI_ALLOW_FAKE_EMBEDDINGS=true
+SHIYI_ENVIRONMENT=development
+SHIYI_VOYAGE_MODEL=shiyi-fake-v1
+SHIYI_EMBED_DIM=1024
+```
+
+`fake`, missing provider, missing key, missing model, and missing dimension are
+rejected by the production preflight. The fake provider is not a production
+embedding substitute; its model must use the reserved `shiyi-fake-*`
+namespace, which production also rejects. The normal configuration never
+enables it.
 
 ## Test database isolation
 
@@ -80,6 +95,11 @@ SHIYI_TEST_DATABASE_MARKER
 ```
 
 The fixture verifies `current_database()` and the marker row before using the
-connection. It deletes only rows under its own `test-<run-id>` namespace. A
-CI run creates a random temporary database and marker, then drops it in an
-`always()` cleanup step.
+connection. It deletes only rows under its own `test-<run-id>` namespace. A CI
+run creates a random temporary database and marker, applies the checked-in
+forward-only migrations through `shiyi db migrate`, then drops it in an
+`always()` cleanup step. A separate isolated CI fixture applies the historical
+`schema.sql` once and verifies that the same CLI command adopts the complete
+legacy structure into the migration ledger; partial or drifted legacy schemas
+are rejected. The fresh-database fixture does not use `schema.sql` as a
+shortcut.

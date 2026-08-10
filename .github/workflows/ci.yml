@@ -7,6 +7,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       # Synthetic service credentials only; no repository or user credential
       # is used by CI.  The test DSN itself omits the password and psycopg2
@@ -14,7 +16,7 @@ jobs:
       PGPASSWORD: shiyi-ci-only
     services:
       postgres:
-        image: pgvector/pgvector:pg17
+        image: pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
         env:
           POSTGRES_USER: shiyi_ci
           POSTGRES_PASSWORD: shiyi-ci-only
@@ -28,18 +30,28 @@ jobs:
           --health-retries 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
         with:
           version: '0.12.3'
 
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
+
+      - name: Verify lockfile and dependency vulnerabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv lock --check
+          uv export --locked --all-groups --no-emit-project --format requirements-txt \
+            > "${RUNNER_TEMP}/shiyi-requirements.txt"
+          uv run pip-audit --requirement "${RUNNER_TEMP}/shiyi-requirements.txt" \
+            --strict --progress-spinner off
 
       - name: Check direct dependency licenses
         run: uv run python tools/check_licenses.py
@@ -106,7 +118,8 @@ jobs:
             --command "ALTER SYSTEM SET shared_preload_libraries = 'vector';"
 
           mapfile -t containers < <(
-            docker ps --filter 'ancestor=pgvector/pgvector:pg17' --format '{{.ID}}'
+            docker ps --format '{{.ID}} {{.Image}}' \
+              | awk '$2 ~ /^pgvector\/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38$/ {print $1}'
           )
           if (( ${#containers[@]} != 1 )); then
             echo "expected exactly one pgvector service container" >&2
@@ -150,14 +163,28 @@ jobs:
           psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
             --set ON_ERROR_STOP=1 --command "CREATE DATABASE \"${db}\";"
           dsn="postgresql://shiyi_ci@127.0.0.1:5432/${db}"
-          psql "${dsn}" --set ON_ERROR_STOP=1 --file schema.sql
           psql "${dsn}" --set ON_ERROR_STOP=1 \
             --command "CREATE TABLE shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES ('${marker}');"
           {
+            echo "SHIYI_DATABASE_DSN=${dsn}"
             echo "SHIYI_TEST_DATABASE_DSN=${dsn}"
             echo "SHIYI_TEST_DATABASE_NAME=${db}"
             echo "SHIYI_TEST_DATABASE_MARKER=${marker}"
           } >> "${GITHUB_ENV}"
+
+      - name: Apply migrations and verify repository health
+        run: |
+          uv run shiyi db migrate
+          uv run shiyi db health
+
+      - name: Verify legacy bootstrap upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          cli="$(uv run python -c 'import shutil; print(shutil.which("shiyi") or "")')"
+          tools/legacy_schema_upgrade_smoke.sh \
+            --cli "${cli}" \
+            --admin-dsn "postgresql://shiyi_ci@127.0.0.1:5432/postgres"
 
       - name: Run tests
         run: uv run pytest -q
@@ -165,7 +192,7 @@ jobs:
       - name: Build sdist and wheel
         run: uv build
 
-      - name: Clean wheel install and CLI smoke
+      - name: Clean wheel install and quickstart lifecycle smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -174,31 +201,61 @@ jobs:
           uv venv --python 3.12 "${smoke_dir}/venv"
           uv pip install --python "${smoke_dir}/venv/bin/python" dist/*.whl
           cli="${smoke_dir}/venv/bin/shiyi"
-          err_dir="${smoke_dir}/errors"
-          mkdir -p "${err_dir}"
-          smoke_cli() {
-            local label="$1"
-            "${cli}" --help >/dev/null
-            "${smoke_dir}/venv/bin/python" - <<'PY'
-          import asyncio
-
-          from mcp_server import build_server
-
-          tools = asyncio.run(build_server().list_tools())
-          assert [tool.name for tool in tools] == ["search"]
-          PY
-            if "${cli}" ingest --source sessions --dry-run >"${err_dir}/${label}-ingest" 2>&1; then exit 1; fi
-            grep -q '^error\[' "${err_dir}/${label}-ingest"
-            if "${cli}" query smoke >"${err_dir}/${label}-query" 2>&1; then exit 1; fi
-            grep -q '^error\[' "${err_dir}/${label}-query"
-            if "${cli}" serve >"${err_dir}/${label}-serve" 2>&1; then exit 1; fi
-            grep -q '^error\[' "${err_dir}/${label}-serve"
-          }
-          smoke_cli wheel
+          "${cli}" --help >/dev/null
+          SHIYI_TEST_DATABASE_MARKER="${SHIYI_TEST_DATABASE_MARKER}" \
+            tools/clean_machine_smoke.sh \
+              --cli "${cli}" \
+              --python "${smoke_dir}/venv/bin/python" \
+              --dsn "${SHIYI_TEST_DATABASE_DSN}" \
+              --database-name "${SHIYI_TEST_DATABASE_NAME}" \
+              --workdir "${smoke_dir}/wheel"
           uv pip install --reinstall --python "${smoke_dir}/venv/bin/python" dist/*.tar.gz
-          smoke_cli sdist
+          "${cli}" --help >/dev/null
+
+      - name: Audit reachable history and public build artifacts
+        shell: bash
+        run: uv run python tools/release_audit.py --root . --artifact-dir dist
+
+      - name: Prepare redacted failure evidence
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="${RUNNER_TEMP}/shiyi-failure-evidence"
+          mkdir -p "${evidence_dir}"
+          cat > "${evidence_dir}/summary.json" <<'JSON'
+          {"status":"failed","raw_logs_uploaded":false,"secret_matches":"counts_only","retention_days":1}
+          JSON
+
+      - name: Upload redacted failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: shiyi-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/shiyi-failure-evidence
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Drop isolated database
         if: always()
         shell: bash
         run: tools/drop_isolated_db.sh
+
+  container_scan:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+      - name: Build pinned PostgreSQL image
+        run: docker build --pull --tag shiyi-release-candidate:ci .
+      - name: Scan built image for high or critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: shiyi-release-candidate:ci
+          format: table
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'

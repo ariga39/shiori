@@ -5,7 +5,7 @@
 
 services:
   session-memory-pg:
-    image: pgvector/pgvector:pg17
+    image: pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
     command: ["postgres", "-c", "shared_preload_libraries=vector"]
     ports:
       - "127.0.0.1:${SHIYI_PG_PORT:-5433}:5432"

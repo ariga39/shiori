@@ -10,7 +10,8 @@ def test_ci_enables_and_verifies_pgvector_preload_before_database_setup():
     block = workflow[preload:prepare]
 
     assert "ALTER SYSTEM SET shared_preload_libraries = 'vector'" in block
-    assert "docker ps --filter 'ancestor=pgvector/pgvector:pg17'" in block
+    assert "docker ps --format '{{.ID}} {{.Image}}'" in block
+    assert "sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38" in block
     assert "docker restart \"${containers[0]}\"" in block
     assert "pg_isready --host 127.0.0.1 --port 5432" in block
     assert "SHOW shared_preload_libraries;" in block
