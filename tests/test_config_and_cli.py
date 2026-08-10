@@ -445,6 +445,61 @@ def test_legacy_shiyi_config_section_is_accepted(tmp_path: Path):
     assert settings.chunk_tokens == 300
 
 
+def test_legacy_config_section_with_canonical_env_fails_closed(tmp_path: Path):
+    """Legacy [shiyi] file section + canonical SHIORI_* env for the same field
+    must fail closed (Phase 4A cross-source conflict)."""
+    config_file = tmp_path / "legacy.toml"
+    config_file.write_text('[shiyi]\nsessions_dir = "/srv/legacy/sessions"\n', encoding="utf-8")
+    with pytest.raises(ConfigError) as exc:
+        load_config(
+            config_path=config_file,
+            environ={"SHIORI_SESSIONS_DIR": "/srv/shiori/sessions"},
+        )
+    assert exc.value.code == "config_source_conflict"
+
+
+def test_legacy_config_section_with_canonical_env_different_field_ok(tmp_path: Path):
+    """A legacy [shiyi] section may coexist with canonical SHIORI_* env when
+    they set different fields; only same-field conflicts fail closed."""
+    config_file = tmp_path / "legacy.toml"
+    config_file.write_text(
+        '[shiyi]\nsessions_dir = "/srv/legacy/sessions"\nchunk_tokens = 300\n',
+        encoding="utf-8",
+    )
+    settings = load_config(
+        config_path=config_file,
+        environ={"SHIORI_VOYAGE_API_URL": "https://api.example.test/v1/embeddings"},
+    )
+    assert settings.sessions_dir == Path("/srv/legacy/sessions")
+    assert settings.chunk_tokens == 300
+    assert settings.voyage_api_url == "https://api.example.test/v1/embeddings"
+
+
+def test_legacy_config_section_with_legacy_env_is_compatible(tmp_path: Path):
+    """Legacy [shiyi] file section + legacy SHIYI_* env for the same field are
+    both old inputs and must remain compatible (env wins), not fail."""
+    config_file = tmp_path / "legacy.toml"
+    config_file.write_text('[shiyi]\nsessions_dir = "/srv/legacy-file"\n', encoding="utf-8")
+    settings = load_config(
+        config_path=config_file,
+        environ={"SHIYI_SESSIONS_DIR": "/srv/legacy-env"},
+    )
+    assert settings.sessions_dir == Path("/srv/legacy-env")
+
+
+def test_canonical_config_section_with_legacy_env_fails_closed(tmp_path: Path):
+    """Canonical [shiori] file section + legacy SHIYI_* env for the same field
+    must fail closed."""
+    config_file = tmp_path / "canonical.toml"
+    config_file.write_text('[shiori]\nsessions_dir = "/srv/canonical"\n', encoding="utf-8")
+    with pytest.raises(ConfigError) as exc:
+        load_config(
+            config_path=config_file,
+            environ={"SHIYI_SESSIONS_DIR": "/srv/legacy"},
+        )
+    assert exc.value.code == "env_alias_conflict"
+
+
 def test_canonical_and_legacy_config_sections_fail_closed(tmp_path: Path):
     config_file = tmp_path / "conflict.toml"
     config_file.write_text(

@@ -68,7 +68,7 @@ def _positive_int(value: Any, name: str) -> int:
     return result
 
 
-def _read_config_file(path: Path) -> dict[str, Any]:
+def _read_config_file(path: Path) -> tuple[dict[str, Any], bool]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -93,13 +93,16 @@ def _read_config_file(path: Path) -> dict[str, Any]:
         )
     if has_canonical:
         section = data["shiori"]
+        legacy = False
     elif has_legacy:
         section = data["shiyi"]
+        legacy = True
     else:
         section = data
+        legacy = False
     if not isinstance(section, dict):
         raise ConfigError("[shiori] config section must be an object", code="invalid_config_file")
-    return dict(section)
+    return dict(section), legacy
 
 
 def _key_value_file(path: Path) -> dict[str, str]:
@@ -514,31 +517,48 @@ def load_config(
     else:
         selected_path = config_path
     values: dict[str, Any] = {}
+    file_is_legacy = False
+    file_values: dict[str, Any] = {}
     if selected_path:
-        values.update(_read_config_file(Path(selected_path).expanduser()))
+        file_values, file_is_legacy = _read_config_file(Path(selected_path).expanduser())
+        values.update(file_values)
 
+    # Canonical ``SHIORI_*`` environment variables.  If the selected config
+    # file already set the same field through the legacy ``[shiyi]`` section,
+    # canonical env must not silently win: old and new coexisting for one field
+    # fails closed.
+    canonical_env_fields: set[str] = set()
     for field_name, env_names in _ENV_FIELDS.items():
         for env_name in env_names:
             if env_name in env and env[env_name] != "":
+                if file_is_legacy and field_name in file_values:
+                    raise ConfigError(
+                        f"legacy [shiyi] config sets {field_name} together with {env_name}",
+                        code="config_source_conflict",
+                    )
                 values[field_name] = env[env_name]
+                canonical_env_fields.add(field_name)
                 break
 
     # Legacy ``SHIYI_*`` variables are accepted as compatible inputs for one
     # migration cycle.  A field set through both a canonical ``SHIORI_*`` name
     # and its legacy alias fails closed; the two are never merged or guessed.
+    # A legacy file section together with a legacy ``SHIYI_*`` variable for the
+    # same field stays compatible (both are old inputs); only canonical + legacy
+    # mixes fail.
     for field_name, legacy_names in _LEGACY_ENV_FIELDS.items():
-        if field_name in values:
-            for legacy_name in legacy_names:
-                if legacy_name in env and env[legacy_name] != "":
-                    raise ConfigError(
-                        f"both {_ENV_FIELDS[field_name][0]} and {legacy_name} are set",
-                        code="env_alias_conflict",
-                    )
+        legacy_value = next(
+            (env[legacy_name] for legacy_name in legacy_names if env.get(legacy_name, "") != ""),
+            None,
+        )
+        if legacy_value is None:
             continue
-        for legacy_name in legacy_names:
-            if legacy_name in env and env[legacy_name] != "":
-                values[field_name] = env[legacy_name]
-                break
+        if field_name in canonical_env_fields or (field_name in values and not file_is_legacy):
+            raise ConfigError(
+                f"both {_ENV_FIELDS[field_name][0]} and a legacy SHIYI_* alias are set",
+                code="env_alias_conflict",
+            )
+        values[field_name] = legacy_value
 
     # Explicit keyword values are the highest-priority layer.  This also lets
     # tests inject values without mutating process-global environment state.
