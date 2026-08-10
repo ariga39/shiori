@@ -24,6 +24,7 @@ import requests
 import tiktoken
 
 from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiyi.privacy import minimize as privacy_minimize
 
 # ── Config ───────────────────────────────────────────────────────────────────
 ARCHIVE_DIR = None
@@ -178,7 +179,7 @@ def format_message(msg):
     if not content.strip():
         return None
 
-    return f"[{ts_str}] {name}: {content}"
+    return f"[{ts_str}] {name}: {privacy_minimize(content)}"
 
 
 def parse_discord_timestamp(msg):
@@ -246,7 +247,9 @@ def build_chunks(messages, channel_name):
     total_tokens = len(all_tokens)
     chunks = []
     tok_start = 0
-    session_id = f"discord-{channel_name}"
+    from shiyi.session_ids import discord_session_id
+
+    session_id = discord_session_id(channel_name)
 
     while tok_start < total_tokens:
         tok_end = min(tok_start + CHUNK_TOKENS, total_tokens)
