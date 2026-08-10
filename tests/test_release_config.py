@@ -22,11 +22,8 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "legacy_schema_upgrade_smoke.sh" in workflow
     assert "trivy-action" in workflow
     assert 'service_container="${{ job.services.postgres.id }}"' in workflow
-    assert "docker ps --no-trunc --filter \"id=${service_container}\"" in workflow
-    assert 'image_id="$(docker inspect --format \'{{.Image}}\' "${service_container}")"' in workflow
-    assert "docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}'" in workflow
+    assert "tools/verify_pgvector_image.sh \"${expected_image}\" \"${service_container}\"" in workflow
     assert f'expected_image="pgvector/pgvector@{PGVECTOR_DIGEST}"' in workflow
-    assert "pgvector service image digest does not match the pinned digest" in workflow
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "raw_logs_uploaded\":false" in workflow
     assert "retention-days: 1" in workflow
@@ -37,5 +34,6 @@ def test_manifest_contains_runtime_release_references() -> None:
 
     assert "include schema.sql" in manifest
     assert "include tools/legacy_schema_upgrade_smoke.sh" in manifest
+    assert "include tools/verify_pgvector_image.sh" in manifest
     assert "recursive-include docs *.md" in manifest
     assert "include THIRD_PARTY_NOTICES.md" in manifest

@@ -123,23 +123,7 @@ jobs:
             echo "GitHub Actions did not provide a valid postgres service container id" >&2
             exit 1
           fi
-          mapfile -t containers < <(
-            docker ps --no-trunc --filter "id=${service_container}" --format '{{.ID}}'
-          )
-          if (( ${#containers[@]} != 1 )); then
-            echo "expected exactly one postgres service container for the job service id" >&2
-            exit 1
-          fi
-          image_id="$(docker inspect --format '{{.Image}}' "${service_container}")"
-          if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "postgres service container did not expose a valid image id" >&2
-            exit 1
-          fi
-          if ! docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image_id}" \
-            | grep -Fxq "${expected_image}"; then
-            echo "pgvector service image digest does not match the pinned digest" >&2
-            exit 1
-          fi
+          tools/verify_pgvector_image.sh "${expected_image}" "${service_container}" >/dev/null
           docker restart "${service_container}" >/dev/null
 
           ready=false
