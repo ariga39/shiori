@@ -118,20 +118,24 @@ jobs:
             --command "ALTER SYSTEM SET shared_preload_libraries = 'vector';"
 
           expected_image="pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38"
-          mapfile -t containers < <(
-            docker ps --format '{{.ID}} {{.Image}}' \
-              | awk '$2 ~ /^pgvector\/pgvector([:@]|$)/ {print $1}'
-          )
-          if (( ${#containers[@]} != 1 )); then
-            echo "expected exactly one pgvector service container" >&2
+          service_container="${{ job.services.postgres.id }}"
+          if [[ ! "${service_container}" =~ ^[0-9a-f]{12,64}$ ]]; then
+            echo "GitHub Actions did not provide a valid postgres service container id" >&2
             exit 1
           fi
-          if ! docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${containers[0]}" \
+          mapfile -t containers < <(
+            docker ps --no-trunc --filter "id=${service_container}" --format '{{.ID}}'
+          )
+          if (( ${#containers[@]} != 1 )); then
+            echo "expected exactly one postgres service container for the job service id" >&2
+            exit 1
+          fi
+          if ! docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${service_container}" \
             | grep -Fxq "${expected_image}"; then
             echo "pgvector service image digest does not match the pinned digest" >&2
             exit 1
           fi
-          docker restart "${containers[0]}" >/dev/null
+          docker restart "${service_container}" >/dev/null
 
           ready=false
           for _ in {1..60}; do

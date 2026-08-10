@@ -21,6 +21,8 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "clean_machine_smoke.sh" in workflow
     assert "legacy_schema_upgrade_smoke.sh" in workflow
     assert "trivy-action" in workflow
+    assert 'service_container="${{ job.services.postgres.id }}"' in workflow
+    assert "docker ps --no-trunc --filter \"id=${service_container}\"" in workflow
     assert "docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}'" in workflow
     assert f'expected_image="pgvector/pgvector@{PGVECTOR_DIGEST}"' in workflow
     assert "pgvector service image digest does not match the pinned digest" in workflow
