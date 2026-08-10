@@ -27,6 +27,7 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     assert "raw_logs_uploaded\":false" in workflow
     assert "retention-days: 1" in workflow
+    assert workflow.count("fetch-depth: 0") == 2
 
 
 def test_manifest_contains_runtime_release_references() -> None:
