@@ -51,6 +51,16 @@ def _build_parser() -> argparse.ArgumentParser:
     restore = db_sub.add_parser("restore", help="restore a backup into a NEW staging database")
     restore.add_argument("src", help="backup path")
     restore.add_argument("--target", required=True, help="new staging database name (must not exist)")
+
+    privacy = sub.add_parser("privacy", help="privacy lifecycle operations")
+    _config_args(privacy, suppress_default=True)
+    privacy_sub = privacy.add_subparsers(dest="privacy_command", required=True)
+    privacy_sub.add_parser("providers", help="disclose sources, data flow, and retention")
+    export = privacy_sub.add_parser("export", help="export data in a scope")
+    export.add_argument("--scope", required=True)
+    export.add_argument("--dest", default="-")
+    delete = privacy_sub.add_parser("delete", help="delete data in a scope")
+    delete.add_argument("--scope", required=True)
     return parser
 
 
@@ -189,6 +199,25 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
         conn.close()
 
 
+def _run_privacy(args: argparse.Namespace, settings: Settings) -> int:
+    from .privacy import delete, export, providers
+
+    if args.privacy_command == "providers":
+        for provider in providers():
+            name = provider["name"]
+            print(f"{name}: endpoint={provider['endpoint']} flow={provider['data_flow']} "
+                  f"retention_days={provider['retention_days']} local_only={provider['is_local_only']}")
+        return 0
+    if args.privacy_command == "export":
+        dest = None if args.dest == "-" else args.dest
+        export(scope=args.scope, dest=dest, confirm=False)
+        print("export requires explicit confirmation; no side effect performed (dry-run)")
+        return 0
+    delete(scope=args.scope, confirm=False)
+    print("delete requires explicit confirmation; no side effect performed (dry-run)")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
@@ -199,6 +228,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_query(args, settings)
         if args.command == "db":
             return _run_db(args, settings)
+        if args.command == "privacy":
+            return _run_privacy(args, settings)
         return _run_serve(args, settings)
     except ConfigError as exc:
         print(f"error[{exc.code}]: {exc}", file=sys.stderr)
