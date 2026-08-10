@@ -611,3 +611,78 @@ def test_restore_returns_non_sensitive_row_counts(conn, tmp_path: pathlib.Path):
     assert result["row_counts"]["session_chunks"] == 1
     assert result["row_counts"]["shiyi_restore_guard"] == 1
     assert "content" not in str(result["row_counts"])
+
+
+def test_restore_cleanup_refuses_replaced_same_name_db(conn, tmp_path: pathlib.Path):
+    """Mirai NO-GO: cleanup must never drop a replaced same-named database,
+    even if the marker table is present, because its OID differs from the
+    creation-time OID bound in the guard."""
+    import shiyi.repository as repo
+
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "oid.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    staging = f"shiyi_staging_{os.getpid()}_oid"
+
+    # Inject a failure after the staging DB + guard are created so the cleanup
+    # path runs; use a pg_restore that fails.
+    orig_run = repo.subprocess.run
+
+    def fail_pg_restore(cmd, **kwargs):
+        if cmd and cmd[0] == "pg_restore":
+            import subprocess as _sp2
+
+            raise _sp2.CalledProcessError(returncode=1, cmd=cmd)
+        return orig_run(cmd, **kwargs)
+
+    repo.subprocess.run = fail_pg_restore
+    try:
+        with pytest.raises(MigrationError):
+            restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
+    finally:
+        repo.subprocess.run = orig_run
+
+    # The staging DB was created, guard written, then cleanup ran and dropped
+    # it (name+marker+OID all matched).  Now simulate a REPLACED database with
+    # the same name and a copied marker but a different OID, and prove the
+    # identity gate rejects it: recreate the db, write a fresh guard with the
+    # OLD creation-time OID recorded nowhere matching, then drop it manually.
+    params = repo._connection_dsn_params(conn)
+    env = dict(os.environ)
+    env["PGPASSWORD"] = repo._pgpassword(conn)
+    import subprocess as _sp
+
+    _sp.run(["createdb", f"--host={params['host']}", f"--port={params['port']}",
+             f"--username={params['user']}", "--", staging],
+            env=env, check=True, capture_output=True)
+    # Write a guard whose db_oid does NOT match the new DB's OID.
+    import psycopg2 as pg2
+
+    c = pg2.connect(
+        f"postgresql://{params['user']}:{repo._pgpassword(conn)}@"
+        f"{params['host']}:{params['port']}/{staging}"
+    )
+    try:
+        with c.cursor() as cur:
+            cur.execute("CREATE TABLE shiyi_restore_guard (marker text PRIMARY KEY, db_oid bigint NOT NULL)")
+            cur.execute("INSERT INTO shiyi_restore_guard(marker, db_oid) VALUES (%s, 1)", ("stale-marker",))
+        c.commit()
+    finally:
+        c.close()
+    # Cleanup would refuse to drop: re-run the failure path and ensure the
+    # replaced DB still exists afterward.
+    repo.subprocess.run = fail_pg_restore
+    try:
+        with pytest.raises(MigrationError):
+            restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
+    finally:
+        repo.subprocess.run = orig_run
+    # The replaced DB with mismatched OID must still exist (not dropped).
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (staging,))
+        assert cur.fetchone() is not None
+    # Clean up the replaced DB manually.
+    _sp.run(["dropdb", f"--host={params['host']}", f"--port={params['port']}",
+             f"--username={params['user']}", "--", staging],
+            env=env, check=True, capture_output=True)

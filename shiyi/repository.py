@@ -487,8 +487,22 @@ def restore(
         staging_conn = psycopg2.connect(staging_dsn_internal)
         try:
             with staging_conn.cursor() as cur:
-                cur.execute("CREATE TABLE shiyi_restore_guard (marker text PRIMARY KEY)")
-                cur.execute("INSERT INTO shiyi_restore_guard(marker) VALUES (%s)", (marker,))
+                cur.execute("SELECT oid FROM pg_database WHERE datname = current_database()")
+                oid_row = cur.fetchone()
+                if oid_row is None:
+                    raise MigrationError(
+                        "restore_identity_unavailable",
+                        "staging database identity is unavailable",
+                    )
+                creation_oid = int(oid_row[0])
+                cur.execute(
+                    "CREATE TABLE shiyi_restore_guard "
+                    "(marker text PRIMARY KEY, db_oid bigint NOT NULL)"
+                )
+                cur.execute(
+                    "INSERT INTO shiyi_restore_guard(marker, db_oid) VALUES (%s, %s)",
+                    (marker, creation_oid),
+                )
             staging_conn.commit()
         finally:
             staging_conn.close()
@@ -550,10 +564,10 @@ def restore(
             "row_counts": row_counts,
         }
     except Exception:
-        # Only drop the staging DB this call created: re-verify BOTH the marker
-        # identity and that the connected database is still the same named
-        # target we created (current_database + its OID via pg_database), so a
-        # replaced/foreign database is never dropped.
+        # Only drop the staging DB this call created: re-verify the NAME, the
+        # marker, AND the creation-time OID (bound in the guard table) all
+        # match the live database before dropdb.  A replaced same-named
+        # database gets a different OID and is never dropped.
         try:
             import psycopg2 as _pg2
 
@@ -562,7 +576,7 @@ def restore(
                 with check.cursor() as cur:
                     cur.execute("SELECT current_database()")
                     current_db_row = cur.fetchone()
-                    cur.execute("SELECT marker FROM shiyi_restore_guard")
+                    cur.execute("SELECT marker, db_oid FROM shiyi_restore_guard")
                     row = cur.fetchone()
                     cur.execute(
                         "SELECT oid FROM pg_database WHERE datname = %s",
@@ -577,6 +591,7 @@ def restore(
                 and oid_row is not None
                 and row is not None
                 and row[0] == marker
+                and int(oid_row[0]) == int(row[1])
             ):
                 _run_argv(
                     ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",
