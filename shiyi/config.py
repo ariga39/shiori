@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import tomllib
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
@@ -86,17 +87,67 @@ def _read_config_file(path: Path) -> dict[str, Any]:
 
 def _key_value_file(path: Path) -> dict[str, str]:
     try:
+        file_stat = path.lstat()
+    except OSError as exc:
+        raise ConfigError("database credential file is unreadable", code="credential_file_unreadable") from exc
+    mode = stat.S_IMODE(file_stat.st_mode)
+    if (
+        not stat.S_ISREG(file_stat.st_mode)
+        or path.is_symlink()
+        or mode & 0o077
+        or not mode & 0o400
+        or mode & 0o100
+    ):
+        raise ConfigError(
+            "database credential file must be a private regular file",
+            code="credential_file_permissions",
+        )
+    try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError as exc:
-        raise ConfigError(f"credential file cannot be read: {path}", code="credential_file_unreadable") from exc
+        raise ConfigError("database credential file is unreadable", code="credential_file_unreadable") from exc
     values: dict[str, str] = {}
     for line in lines:
         line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
+        if not line or line.startswith("#"):
             continue
+        if "=" not in line:
+            raise ConfigError("database credential file contains an invalid line", code="invalid_database_config")
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip()
+        key = key.strip()
+        if not key or key in values:
+            raise ConfigError(
+                "database credential file contains a duplicate or empty key",
+                code="invalid_database_config",
+            )
+        values[key] = value.strip()
     return values
+
+
+def _validated_pg_credentials(values: dict[str, str]) -> dict[str, str]:
+    """Validate and return the two documented psycopg2 credential shapes."""
+    if "dsn" in values:
+        if len(values) != 1 or not values["dsn"]:
+            raise ConfigError("database credential dsn is invalid", code="invalid_database_config")
+        return {"dsn": values["dsn"]}
+
+    required = ("host", "port", "dbname", "user", "password")
+    unknown = sorted(set(values) - set(required))
+    if unknown:
+        raise ConfigError("database credential file contains an unknown key", code="invalid_database_config")
+    missing = [key for key in required if not values.get(key)]
+    if missing:
+        raise ConfigError(
+            "database credentials missing: " + ", ".join(missing),
+            code="invalid_database_config",
+        )
+    try:
+        port = int(values["port"])
+    except ValueError as exc:
+        raise ConfigError("database credential port is invalid", code="invalid_database_config") from exc
+    if not 1 <= port <= 65535:
+        raise ConfigError("database credential port is invalid", code="invalid_database_config")
+    return {**values, "port": str(port)}
 
 
 @dataclass(frozen=True)
@@ -306,7 +357,7 @@ class Settings:
         result = asdict(self)
         for key, value in list(result.items()):
             if isinstance(value, Path):
-                result[key] = str(value)
+                result[key] = "<redacted-path>"
         if result.get("voyage_api_key"):
             result["voyage_api_key"] = "<redacted>"
         if result.get("database_dsn"):
@@ -452,7 +503,13 @@ def redact_dsn(dsn: str) -> str:
 
 
 def credentials_from_settings(settings: Settings) -> dict[str, str]:
-    """Return explicit DB credentials, never searching ambient home files."""
+    """Return one explicit, validated psycopg2 connection shape.
+
+    A ``SHIYI_PG_CRED`` file may use either a complete ``dsn=...`` entry or
+    the documented ``host/port/dbname/user/password`` shape. The latter is
+    returned as keyword arguments so libpq performs its own safe parameter
+    handling; callers must not assume every result has a ``dsn`` key.
+    """
     if settings.database_dsn:
         return {"dsn": settings.database_dsn}
     if settings.pg_cred_file is None:
@@ -460,7 +517,24 @@ def credentials_from_settings(settings: Settings) -> dict[str, str]:
             "database is not configured; set SHIYI_DATABASE_DSN or SHIYI_PG_CRED",
             code="database_not_configured",
         )
-    return _key_value_file(settings.pg_cred_file)
+    return _validated_pg_credentials(_key_value_file(settings.pg_cred_file))
+
+
+def connect_database(settings: Settings) -> Any:
+    """Open the configured database without exposing DSNs or credentials."""
+    import psycopg2
+
+    try:
+        # psycopg2's bundled stubs model only the positional DSN overload even
+        # though the runtime accepts the documented libpq keyword parameters.
+        # Keep the validated shape explicit at our boundary and let the driver
+        # perform the actual parameter handling.
+        connect_fn: Any = psycopg2.connect
+        return connect_fn(**credentials_from_settings(settings))
+    except ConfigError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - normalize driver errors safely
+        raise ConfigError("database connection failed", code="database_connection_failed") from exc
 
 
 def config_summary(settings: Settings) -> str:

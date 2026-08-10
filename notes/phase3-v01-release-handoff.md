@@ -40,6 +40,21 @@ provider/model/dimension, so fake and production vectors cannot mix; production
 rejects the fake namespace. Provider/privacy output is redacted and never
 returns a key, DSN, or path.
 
+The explicit `SHIYI_PG_CRED` key/value file path is validated at the typed
+configuration boundary and returned as safe `psycopg2.connect(**credentials)`
+parameters, while a direct DSN remains `{"dsn": ...}`. The installed CLI and
+privacy/query callers therefore do not index a raw mapping as if it contained
+a `dsn` key. Unknown, duplicate, missing, malformed-port, symlink, and
+non-private-file inputs fail with structured, non-secret errors. The clean
+wheel smoke now creates a synthetic mode-0600 key/value file and runs the
+installed CLI lifecycle through that path.
+
+Restore verifies the staging database name, live database OID, generated
+marker, and creation-time OID before returning success. A one-row guard that
+was replaced by restore input therefore fails closed; cleanup also compares
+against the locally captured creation-time OID rather than trusting a mutable
+replacement guard row.
+
 Legacy adoption is fail-closed: only a complete canonical `schema.sql` shape
 can be registered as migration 0001 without replaying DDL. Partial, drifted,
 or ambiguous structures receive a structured error, write no migration ledger
@@ -70,7 +85,7 @@ release gate.
 
 | Gate | Local candidate evidence | Hosted requirement |
 | --- | --- | --- |
-| locked install, Ruff, Pyright, unit tests | `153 passed, 101 skipped`; skips are explicit no-local-PostgreSQL classes; Ruff/Pyright/lock/compileall/diff-check clean | terminal green |
+| locked install, Ruff, Pyright, unit tests | `163 passed, 103 skipped`; skips are explicit no-local-PostgreSQL classes; Ruff/Pyright/lock/compileall/diff-check clean | terminal green |
 | PostgreSQL/pgvector, client/server major parity, vector preload, isolated DB marker/identity | not available on the author workstation | real service, no required skips |
 | fresh `shiyi db migrate`/`db health` | command is wired into CI and clean-machine smoke | terminal green |
 | legacy schema adoption and partial/drift rejection | synthetic tests and `tools/legacy_schema_upgrade_smoke.sh` | terminal green |
@@ -80,8 +95,8 @@ release gate.
 | reachable history/commit metadata/artifact audit | offline `release_audit.py` is wired and emits counts/object prefixes only | terminal green on a non-shallow checkout |
 | compose-built container runtime smoke and HIGH/CRITICAL scan | Docker unavailable locally | terminal green against the same built image |
 
-At the pre-successor offline verification, the local full suite was `153
-passed, 101 skipped`; the skips are explicit no-local-PostgreSQL classes. Ruff,
+At the latest offline verification, the local full suite was `163 passed, 103
+skipped`; the skips are explicit no-local-PostgreSQL classes. Ruff,
 Pyright, lock, compileall, and diff-check were clean. The exact successor's
 release-audit aggregate is recomputed after its append-only commit and reported
 with the publication message; these local results do not substitute for the

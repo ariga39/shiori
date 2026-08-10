@@ -649,6 +649,81 @@ def test_restore_returns_non_sensitive_row_counts(conn, tmp_path: pathlib.Path):
     assert "content" not in str(result["row_counts"])
 
 
+@pytest.mark.parametrize(
+    ("replacement_marker", "oid_delta"),
+    [("restore-foreign-marker", 0), (None, 1)],
+)
+def test_restore_success_revalidates_staging_guard_identity(
+    conn, tmp_path: pathlib.Path, monkeypatch, replacement_marker, oid_delta
+):
+    """A one-row guard replaced by the restore input must not be accepted."""
+    import shiyi.repository as repo
+
+    _reset_schema(conn)
+    migrate(conn, migrations_dir=MIGRATIONS_DIR)
+    dest = tmp_path / "guard-replaced.dump"
+    backup(conn, dest, migrations_dir=MIGRATIONS_DIR)
+    staging = f"shiyi_guard_swap_{os.getpid()}_{abs(hash((replacement_marker, oid_delta))) % 10000}"
+    params = repo._connection_dsn_params(conn)
+    pw = repo._pgpassword(conn)
+    import psycopg2 as pg2
+
+    original_run = repo._run_argv
+
+    def replace_guard(cmd: list[str], env: dict[str, str]) -> None:
+        if cmd and cmd[0] == "pg_restore":
+            staging_conn = pg2.connect(
+                f"postgresql://{params['user']}:{pw}@{params['host']}:{params['port']}/{staging}"
+            )
+            try:
+                with staging_conn.cursor() as cur:
+                    cur.execute("SELECT marker, db_oid FROM shiyi_restore_guard")
+                    original_marker, original_oid = cur.fetchone()
+                    cur.execute("DROP TABLE shiyi_restore_guard")
+                    cur.execute(
+                        "CREATE TABLE shiyi_restore_guard "
+                        "(marker text PRIMARY KEY, db_oid bigint NOT NULL)"
+                    )
+                    cur.execute(
+                        "INSERT INTO shiyi_restore_guard(marker, db_oid) VALUES (%s, %s)",
+                        (
+                            replacement_marker if replacement_marker is not None else original_marker,
+                            int(original_oid) + oid_delta,
+                        ),
+                    )
+                staging_conn.commit()
+            finally:
+                staging_conn.close()
+            return
+        original_run(cmd, env)
+
+    monkeypatch.setattr(repo, "_run_argv", replace_guard)
+    with pytest.raises(MigrationError) as exc:
+        restore(conn, dest, target_name=staging, migrations_dir=MIGRATIONS_DIR)
+    assert exc.value.code == "restore_verification_failed"
+
+    # The staging DB remains for operator inspection because its guard no
+    # longer proves ownership; cleanup must never drop it as our database.
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (staging,))
+        assert cur.fetchone() is not None
+
+    monkeypatch.setattr(repo, "_run_argv", original_run)
+    env = dict(os.environ)
+    env["PGPASSWORD"] = pw
+    original_run(
+        [
+            "dropdb",
+            f"--host={params['host']}",
+            f"--port={params['port']}",
+            f"--username={params['user']}",
+            "--",
+            staging,
+        ],
+        env,
+    )
+
+
 def test_restore_cleanup_refuses_replaced_same_name_db(conn, tmp_path: pathlib.Path):
     """Mirai NO-GO: cleanup must never drop a replaced same-named database,
     even when the guard table is copied with the same marker AND the same

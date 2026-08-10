@@ -10,6 +10,7 @@ DOCKERFILE = ROOT / "Dockerfile"
 COMPOSE = ROOT / "deploy" / "docker-compose.yml"
 RUN_SCRIPT = ROOT / "deploy" / "run.sh"
 RUNTIME_SMOKE = ROOT / "tools" / "container_runtime_smoke.sh"
+CLEAN_SMOKE = ROOT / "tools" / "clean_machine_smoke.sh"
 PGVECTOR_DIGEST = "sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38"
 
 
@@ -82,6 +83,10 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "SELECT count(*) FROM shiyi_container_smoke" in runtime_smoke
     assert "shared_preload_libraries=vector" in runtime_smoke
     assert "id -u" in runtime_smoke
+    clean_smoke = CLEAN_SMOKE.read_text(encoding="utf-8")
+    assert 'export SHIYI_PG_CRED="${credential_file}"' in clean_smoke
+    assert 'unset SHIYI_DATABASE_DSN' in clean_smoke
+    assert 'chmod 600 "${credential_file}"' in clean_smoke
 
 
 def test_manifest_contains_runtime_release_references() -> None:

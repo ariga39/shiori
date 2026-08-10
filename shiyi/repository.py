@@ -461,6 +461,7 @@ def restore(
 
     marker = f"restore-{uuid.uuid4().hex}"
     staging_db = _validate_db_name(target_name)
+    creation_oid: int | None = None
 
     # Create a fresh staging database.
     env = dict(os.environ)
@@ -531,9 +532,41 @@ def restore(
                         "restore_verification_failed",
                         f"restored staging database not healthy: {health['state']}",
                     )
-                # Non-sensitive row-count summary: verify the restored facts are
-                # present without ever exposing their contents.
+                # The staging identity is part of the restore contract, not
+                # just a cleanup concern.  A backup can contain a guard table
+                # with one plausible row; only the marker generated here and
+                # the creation-time OID captured before pg_restore prove that
+                # this is still our staging database.
                 with staging_conn.cursor() as cur:
+                    try:
+                        cur.execute(
+                            "SELECT current_database(), oid "
+                            "FROM pg_database WHERE datname = current_database()"
+                        )
+                        identity_row = cur.fetchone()
+                        cur.execute("SELECT marker, db_oid FROM shiyi_restore_guard")
+                        guard_rows = cur.fetchall()
+                    except Exception as exc:
+                        raise MigrationError(
+                            "restore_verification_failed",
+                            "restored staging database identity could not be verified",
+                        ) from exc
+                    if (
+                        identity_row is None
+                        or identity_row[0] != staging_db
+                        or creation_oid is None
+                        or int(identity_row[1]) != creation_oid
+                        or len(guard_rows) != 1
+                        or guard_rows[0][0] != marker
+                        or int(guard_rows[0][1]) != creation_oid
+                    ):
+                        raise MigrationError(
+                            "restore_verification_failed",
+                            "restored staging database identity does not match this operation",
+                        )
+
+                    # Non-sensitive row-count summary: verify the restored facts are
+                    # present without ever exposing their contents.
                     row_counts = {}
                     for table in EXPECTED_TABLES:
                         cur.execute(f'SELECT count(*) FROM "{table}"')
@@ -577,7 +610,7 @@ def restore(
                     cur.execute("SELECT current_database()")
                     current_db_row = cur.fetchone()
                     cur.execute("SELECT marker, db_oid FROM shiyi_restore_guard")
-                    row = cur.fetchone()
+                    guard_rows = cur.fetchall()
                     cur.execute(
                         "SELECT oid FROM pg_database WHERE datname = %s",
                         (staging_db,),
@@ -589,9 +622,11 @@ def restore(
                 current_db_row is not None
                 and current_db_row[0] == staging_db
                 and oid_row is not None
-                and row is not None
-                and row[0] == marker
-                and int(oid_row[0]) == int(row[1])
+                and len(guard_rows) == 1
+                and guard_rows[0][0] == marker
+                and creation_oid is not None
+                and int(oid_row[0]) == creation_oid
+                and int(guard_rows[0][1]) == creation_oid
             ):
                 _run_argv(
                     ["dropdb", f"--host={admin['host']}", f"--port={admin['port']}",

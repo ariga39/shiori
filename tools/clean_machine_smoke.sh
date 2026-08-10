@@ -58,6 +58,23 @@ if [[ ! "${SHIYI_TEST_DATABASE_MARKER}" =~ ^ci-[A-Za-z0-9_-]+$ ]]; then
   echo "refusing malformed isolated database marker" >&2
   exit 1
 fi
+
+# Exercise the documented private key/value credential path through the
+# installed wheel. Keep the file under the fresh harness home and create it
+# before any command can read it; no host credential file is consulted.
+credential_file="${workdir}/home/pg-credentials"
+umask 077
+cat > "${credential_file}" <<EOF
+host=127.0.0.1
+port=5432
+dbname=${database_name}
+user=shiyi_ci
+password=${PGPASSWORD}
+EOF
+chmod 600 "${credential_file}"
+unset SHIYI_DATABASE_DSN
+export SHIYI_PG_CRED="${credential_file}"
+
 psql "${dsn}" --set ON_ERROR_STOP=1 \
   --command "CREATE TABLE IF NOT EXISTS shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES ('${SHIYI_TEST_DATABASE_MARKER}') ON CONFLICT (marker) DO NOTHING;"
 guard_count="$(psql "${dsn}" --set ON_ERROR_STOP=1 --tuples-only --no-align --command 'SELECT count(*) FROM shiyi_test_guard;')"
