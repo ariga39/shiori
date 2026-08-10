@@ -32,6 +32,12 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--force", action="store_true", help="reprocess unchanged records")
     ingest.add_argument("--file", help="Discord JSONL file (explicit file mode)")
     ingest.add_argument("--session", help="Hermes session id")
+    ingest.add_argument(
+        "--redact",
+        action="store_true",
+        default=True,
+        help="redact recognized PII at extraction (forced on; fail-closed)",
+    )
 
     query = sub.add_parser("query", help="search indexed memory")
     _config_args(query, suppress_default=True)

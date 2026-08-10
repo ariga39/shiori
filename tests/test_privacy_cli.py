@@ -26,3 +26,11 @@ def test_privacy_delete_requires_confirmation(capsys):
     assert rc == 0
     assert "requires explicit confirmation" in out or "dry-run" in out.lower()
     assert "deleted" not in out.lower()
+
+
+def test_ingest_redact_flag_is_forced_on(capsys):
+    from shiyi.cli import _build_parser
+
+    # --redact must be a recognized ingest flag (fail-closed, forced redaction).
+    args = _build_parser().parse_args(["ingest", "--redact", "--source", "sessions", "--dry-run"])
+    assert getattr(args, "redact", False) is True

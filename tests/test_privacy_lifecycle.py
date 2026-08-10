@@ -61,3 +61,35 @@ def test_providers_disclose_all_registered_sources() -> None:
     for provider in providers:
         assert provider["endpoint"]
         assert provider["retention_days"] > 0
+
+
+def test_extract_text_from_message_redacts_pii() -> None:
+    import ingest
+
+    obj = {
+        "message": {
+            "role": "user",
+            "content": "token sk_live_abcdef0123456789 and email a@b.example and /home/u/config.json",
+        }
+    }
+    out = ingest.extract_text_from_message(obj)
+    assert out is not None
+    assert "sk_live_abcdef0123456789" not in out
+    assert "a@b.example" not in out
+    assert "/home/u/config.json" not in out
+
+
+def test_format_message_redacts_pii() -> None:
+    import ingest_discord
+
+    msg = {
+        "type": 0,
+        "timestamp": "2026-08-03T10:00:00Z",
+        "author": {"username": "alice"},
+        "content": "token sk_live_abcdef0123456789 email a@b.example /home/u/config.json",
+    }
+    out = ingest_discord.format_message(msg)
+    assert out is not None
+    assert "sk_live_abcdef0123456789" not in out
+    assert "a@b.example" not in out
+    assert "/home/u/config.json" not in out

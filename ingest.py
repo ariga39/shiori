@@ -24,6 +24,7 @@ import requests
 import tiktoken
 
 from shiyi.config import ConfigError, Settings, credentials_from_settings, load_config
+from shiyi.privacy import minimize as privacy_minimize
 
 # ── Config ───────────────────────────────────────────────────────────────────
 # These compatibility constants are intentionally not data-source defaults.
@@ -233,7 +234,7 @@ def extract_text_from_message(obj):
     if not trimmed or len(trimmed) < 5:
         return None
 
-    return f"[{role}] {trimmed}"
+    return f"[{role}] {privacy_minimize(trimmed)}"
 
 
 # ── Token-based chunking ────────────────────────────────────────────────────
