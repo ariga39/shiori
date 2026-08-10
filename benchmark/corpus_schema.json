@@ -1,0 +1,51 @@
+{
+  "schema_version": "2",
+  "description": "Versioned schema for the task #11 retrieval-quality benchmark corpus and query judgments. All content is synthetic and human-authored/explicit; relevance labels are not seed-derived. Schema v2 adds explicit relevance grades (0-3), structured multi-turn context, and source filtering.",
+  "corpus_document": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "lang", "content", "session", "timestamp", "source_kind", "tags"],
+    "properties": {
+      "id": {"type": "string", "pattern": "^doc-[0-9]{4}$"},
+      "lang": {"type": "string", "enum": ["en", "zh", "ja"]},
+      "content": {"type": "string", "minLength": 1},
+      "session": {"type": "string", "pattern": "^bench-[a-z0-9-]+$"},
+      "timestamp": {"type": "string", "format": "date-time"},
+      "source_kind": {"type": "string", "enum": ["synthetic-note", "synthetic-faq", "synthetic-log"]},
+      "tags": {"type": "array", "items": {"type": "string"}, "minItems": 0}
+    }
+  },
+  "judgment": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "query_id", "class", "lang", "direction", "query_text",
+      "relevance", "expected_no_evidence",
+      "conversation_context", "source_filter"
+    ],
+    "properties": {
+      "query_id": {"type": "string", "pattern": "^q-[0-9]{4}$"},
+      "class": {"type": "string", "enum": ["exact", "paraphrase", "multilingual", "temporal", "multi_turn", "duplicate", "no_evidence"]},
+      "lang": {"type": "string", "enum": ["en", "zh", "ja"]},
+      "direction": {"type": "string", "enum": ["en", "zh", "ja", "en_to_zh", "zh_to_en", "en_to_ja", "ja_to_en", "zh_to_ja", "ja_to_zh"]},
+      "query_text": {"type": "string", "minLength": 1},
+      "canonical_query": {"type": "string", "minLength": 1},
+      "relevance": {
+        "type": "object",
+        "description": "doc id -> grade (0=not relevant, 1=weakly, 2=relevant, 3=highly relevant)",
+        "patternProperties": {"^doc-[0-9]{4}$": {"type": "integer", "minimum": 0, "maximum": 3}},
+        "additionalProperties": false
+      },
+      "expected_no_evidence": {"type": "boolean"},
+      "conversation_context": {
+        "type": "array",
+        "description": "Prior turns for multi_turn queries (empty otherwise). Each item is a prior utterance rendered as text.",
+        "items": {"type": "string"}
+      },
+      "source_filter": {
+        "type": ["null", "string"],
+        "description": "Optional source/session filter applied before retrieval (e.g. 'bench-db'). null = no filter."
+      }
+    }
+  }
+}

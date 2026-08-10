@@ -1,0 +1,20 @@
+# Exact-pinned benchmark dependencies for the task #11 retrieval benchmark.
+# These are heavy, local-only (model generation) deps and are intentionally NOT
+# part of the wheel runtime surface or [project.optional-dependencies].
+# Install in an isolated venv per benchmark/README.md:
+#   uv venv .venv-benchmark && uv pip install -r benchmark/requirements.lock
+#
+# voyage-4-nano's custom encode_query/encode_document require Sentence
+# Transformers >= 5.0. Versions below were validated on macOS arm64 (Python 3.13).
+# This lock is a reproducibility record; pin exact versions and regenerate only
+# with a deliberate, reviewed change.
+
+sentence-transformers==5.7.0
+# torch is pinned to 2.11.0: it is the version the resolver selects to satisfy
+# Sentence Transformers 5.7.0; the compiled lock must match the runtime used to
+# generate the committed vectors.
+torch==2.11.0
+# transformers is pinned to 4.57.x: ST 5.7.0 + voyage-4-nano custom code
+# (trust_remote_code) is validated on this line; 5.x breaks encode_query/
+# encode_document config loading.
+transformers==4.57.6
