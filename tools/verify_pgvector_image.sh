@@ -19,9 +19,10 @@ if [[ ! "${service_container}" =~ ^[0-9a-f]{12,64}$ ]]; then
   exit 1
 fi
 
-mapfile -t containers < <(
-  docker ps --no-trunc --filter "id=${service_container}" --format '{{.ID}}'
-)
+containers=()
+while IFS= read -r line; do
+  containers+=("${line}")
+done < <(docker ps --no-trunc --filter "id=${service_container}" --format '{{.ID}}')
 if (( ${#containers[@]} != 1 )); then
   echo "expected exactly one service container for the supplied job service id" >&2
   exit 1
