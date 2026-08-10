@@ -130,7 +130,12 @@ jobs:
             echo "expected exactly one postgres service container for the job service id" >&2
             exit 1
           fi
-          if ! docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${service_container}" \
+          image_id="$(docker inspect --format '{{.Image}}' "${service_container}")"
+          if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "postgres service container did not expose a valid image id" >&2
+            exit 1
+          fi
+          if ! docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${image_id}" \
             | grep -Fxq "${expected_image}"; then
             echo "pgvector service image digest does not match the pinned digest" >&2
             exit 1

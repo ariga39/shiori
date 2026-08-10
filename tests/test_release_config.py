@@ -23,7 +23,8 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert "trivy-action" in workflow
     assert 'service_container="${{ job.services.postgres.id }}"' in workflow
     assert "docker ps --no-trunc --filter \"id=${service_container}\"" in workflow
-    assert "docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}'" in workflow
+    assert 'image_id="$(docker inspect --format \'{{.Image}}\' "${service_container}")"' in workflow
+    assert "docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}'" in workflow
     assert f'expected_image="pgvector/pgvector@{PGVECTOR_DIGEST}"' in workflow
     assert "pgvector service image digest does not match the pinned digest" in workflow
     assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
