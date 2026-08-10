@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
     sys.path.insert(0, REPO)
@@ -32,17 +34,15 @@ def test_minimize_keeps_known_safe_text() -> None:
     assert "fund planning" in out
 
 
-def test_export_dry_run_writes_nothing(tmp_path) -> None:
+def test_export_requires_managed_store(tmp_path) -> None:
     dest = tmp_path / "export.json"
-    privacy.export(scope="all", dest=dest, confirm=False)
-    assert not dest.exists()
+    with pytest.raises(privacy.PrivacyError):
+        privacy.export(scope="all", dest=dest, confirm=False)
 
 
-def test_delete_requires_confirmation(tmp_path) -> None:
-    target = tmp_path / "state.db"
-    target.write_text("data")
-    privacy.delete(scope="all", confirm=False)
-    assert target.exists()
+def test_delete_requires_managed_store(tmp_path) -> None:
+    with pytest.raises(privacy.PrivacyError):
+        privacy.delete(scope="all", confirm=False)
 
 
 def test_retention_policy_has_valid_days() -> None:
@@ -59,6 +59,9 @@ def test_providers_disclose_all_registered_sources() -> None:
     for source in privacy.registered_sources():
         assert source.name in names
     for provider in providers:
+        if provider["name"] == "embedding":
+            assert provider["status"] == "not_configured"
+            continue
         assert provider["endpoint"]
         assert provider["retention_days"] > 0
 

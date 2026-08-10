@@ -62,11 +62,16 @@ def _build_parser() -> argparse.ArgumentParser:
     _config_args(privacy, suppress_default=True)
     privacy_sub = privacy.add_subparsers(dest="privacy_command", required=True)
     privacy_sub.add_parser("providers", help="disclose sources, data flow, and retention")
-    export = privacy_sub.add_parser("export", help="export data in a scope")
+    export = privacy_sub.add_parser("export", help="export managed data in a scope")
     export.add_argument("--scope", required=True)
-    export.add_argument("--dest", default="-")
-    delete = privacy_sub.add_parser("delete", help="delete data in a scope")
+    export.add_argument("--dest", required=True)
+    export.add_argument("--yes", action="store_true", help="confirm and write the export")
+    delete = privacy_sub.add_parser("delete", help="delete managed data in a scope")
     delete.add_argument("--scope", required=True)
+    delete.add_argument("--older-than", type=int, help="only delete managed rows older than N days")
+    delete.add_argument("--yes", action="store_true", help="confirm and delete")
+    retention_check_parser = privacy_sub.add_parser("retention-check", help="report managed-data age and expiry")
+    retention_check_parser.add_argument("--scope", required=True)
     return parser
 
 
@@ -206,22 +211,41 @@ def _run_db(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _run_privacy(args: argparse.Namespace, settings: Settings) -> int:
-    from .privacy import delete, export, providers
+    import json as _json
+
+    from .privacy import PrivacyError, delete_scope, export_scope, providers, retention_check
 
     if args.privacy_command == "providers":
-        for provider in providers():
-            name = provider["name"]
-            print(f"{name}: endpoint={provider['endpoint']} flow={provider['data_flow']} "
-                  f"retention_days={provider['retention_days']} local_only={provider['is_local_only']}")
+        print(_json.dumps(providers(settings), sort_keys=True, ensure_ascii=False))
         return 0
-    if args.privacy_command == "export":
-        dest = None if args.dest == "-" else args.dest
-        export(scope=args.scope, dest=dest, confirm=False)
-        print("export requires explicit confirmation; no side effect performed (dry-run)")
+    # export/delete/retention-check operate on the managed store, so they need a DB.
+    import psycopg2
+
+    dsn = settings.require_database()
+    conn = psycopg2.connect(str(dsn))
+    try:
+        if args.privacy_command == "export":
+            result = export_scope(
+                conn, args.scope, args.dest, "cli", confirm=args.yes
+            )
+            print(_json.dumps(result, sort_keys=True, ensure_ascii=False))
+            return 0
+        if args.privacy_command == "retention-check":
+            result = retention_check(conn, args.scope, "cli")
+            print(_json.dumps(result, sort_keys=True, ensure_ascii=False))
+            return 0
+        result = delete_scope(
+            conn, args.scope, "cli",
+            confirm=args.yes,
+            older_than_days=args.older_than,
+        )
+        print(_json.dumps(result, sort_keys=True, ensure_ascii=False))
         return 0
-    delete(scope=args.scope, confirm=False)
-    print("delete requires explicit confirmation; no side effect performed (dry-run)")
-    return 0
+    except PrivacyError as exc:
+        print(f"error[{exc.code}]: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
