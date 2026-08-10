@@ -19,7 +19,7 @@ from shiori.embedding_replay import (
     ReplayError,
     composite_key,
     load_manifest,
-    stable_text_hash,
+    model_identity_fingerprint,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +28,13 @@ MANIFEST = FIXTURES / "manifest.json"
 VECTORS = FIXTURES / "vectors.json"
 CORPUS = FIXTURES / "corpus.jsonl"
 QUERIES = FIXTURES / "queries.jsonl"
+
+MODEL_ID = "voyage-4-nano"
+MODEL_REVISION = "voyageai/voyage-4-nano@main"
+
+
+def _model_key(model_id: str = MODEL_ID, model_revision: str = MODEL_REVISION) -> str:
+    return model_identity_fingerprint(model_id, model_revision)
 
 
 @pytest.fixture(scope="module")
@@ -54,10 +61,11 @@ def test_manifest_matches_fixture_schema() -> None:
     assert manifest.normalized is True
     assert manifest.model_id == "voyage-4-nano"
     assert manifest.model_revision == "voyageai/voyage-4-nano@main"
+    assert manifest.model_key_identity == _model_key()
     assert manifest.query_prompt and manifest.document_prompt
     assert manifest.corpus_input_type == "document"
     assert manifest.query_input_type == "query"
-    assert manifest.key_format == "input_type:sha256(text)"
+    assert manifest.key_format == "model_identity_fingerprint:input_type:sha256(text)"
 
 
 def test_manifest_hashes_match_fixture_files() -> None:
@@ -71,7 +79,9 @@ def test_manifest_hashes_match_fixture_files() -> None:
 
 def test_replay_returns_exact_fixture_vector_for_known_document(embedder: ReplayEmbedder) -> None:
     text = _read_texts(CORPUS)[0]
-    expected = json.loads(VECTORS.read_text(encoding="utf-8"))[composite_key("document", text)]
+    expected = json.loads(VECTORS.read_text(encoding="utf-8"))[
+        composite_key(MODEL_ID, MODEL_REVISION, "document", text)
+    ]
     assert embedder.embed(text, input_type="document") == expected
 
 
@@ -79,13 +89,14 @@ def test_replay_document_and_query_use_distinct_vectors() -> None:
     vectors = json.loads(VECTORS.read_text(encoding="utf-8"))
     doc_text = _read_texts(CORPUS)[0]
     query_text = _read_texts(QUERIES)[0]
-    # The composite key space must separate document and query identities.
-    assert f"document:{stable_text_hash(doc_text)}" in vectors
-    assert f"query:{stable_text_hash(query_text)}" in vectors
+    # The composite key space must separate model, document and query identity.
+    assert composite_key(MODEL_ID, MODEL_REVISION, "document", doc_text) in vectors
+    assert composite_key(MODEL_ID, MODEL_REVISION, "query", query_text) in vectors
     # Same text can live in both spaces and differ.
     same = doc_text
-    if f"query:{stable_text_hash(same)}" in vectors:
-        assert vectors[f"document:{stable_text_hash(same)}"] != vectors[f"query:{stable_text_hash(same)}"]
+    query_key = composite_key(MODEL_ID, MODEL_REVISION, "query", same)
+    if query_key in vectors:
+        assert vectors[composite_key(MODEL_ID, MODEL_REVISION, "document", same)] != vectors[query_key]
 
 
 def test_replay_embeds_every_corpus_document(embedder: ReplayEmbedder) -> None:
@@ -142,7 +153,7 @@ def test_replay_dimension_mismatch_fails_closed(tmp_path: Path) -> None:
     text = _read_texts(CORPUS)[0]
     manifest_data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     vectors_data = json.loads(VECTORS.read_text(encoding="utf-8"))
-    vectors_data[composite_key("document", text)] = [0.0] * 16
+    vectors_data[composite_key(MODEL_ID, MODEL_REVISION, "document", text)] = [0.0] * 16
     from shiori.embedding_replay import file_sha256
 
     manifest_data["vectors"]["sha256"] = "x" * 64
@@ -158,7 +169,7 @@ def test_replay_non_finite_vector_fails_closed(tmp_path: Path) -> None:
     text = _read_texts(CORPUS)[0]
     manifest_data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     vectors_data = json.loads(VECTORS.read_text(encoding="utf-8"))
-    vectors_data[composite_key("document", text)] = [float("nan")] + [0.0] * 1023
+    vectors_data[composite_key(MODEL_ID, MODEL_REVISION, "document", text)] = [float("nan")] + [0.0] * 1023
     from shiori.embedding_replay import file_sha256
 
     manifest_data["vectors"]["sha256"] = "x" * 64
@@ -188,8 +199,41 @@ def test_replay_manifest_missing_model_dimension_fails_closed(tmp_path: Path) ->
     assert exc.value.code == "replay_manifest_invalid"
 
 
-def test_composite_key_is_deterministic_and_binds_type() -> None:
-    assert composite_key("document", "same") == composite_key("document", "same")
-    assert composite_key("document", "same") != composite_key("query", "same")
-    assert composite_key("document", "same") != composite_key("document", "other")
-    assert composite_key("document", "same").startswith("document:")
+def test_composite_key_is_deterministic_and_binds_identity() -> None:
+    assert composite_key(MODEL_ID, MODEL_REVISION, "document", "same") == composite_key(
+        MODEL_ID, MODEL_REVISION, "document", "same"
+    )
+    assert composite_key(MODEL_ID, MODEL_REVISION, "document", "same") != composite_key(
+        MODEL_ID, MODEL_REVISION, "query", "same"
+    )
+    assert composite_key(MODEL_ID, MODEL_REVISION, "document", "same") != composite_key(
+        MODEL_ID, MODEL_REVISION, "document", "other"
+    )
+    # Different model identity must yield a different key (binds the model).
+    assert composite_key(MODEL_ID, MODEL_REVISION, "document", "same") != composite_key(
+        "other-model", "other@rev", "document", "same"
+    )
+    key = composite_key(MODEL_ID, MODEL_REVISION, "document", "same")
+    assert key.startswith(f"{_model_key()}:document:")
+
+
+def test_replay_fixture_from_different_model_fails_closed(tmp_path: Path) -> None:
+    """A vectors fixture whose model fingerprint differs from the manifest must
+    fail closed at load time instead of being silently consumed."""
+    manifest_data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    vectors_data = json.loads(VECTORS.read_text(encoding="utf-8"))
+    # Rewrite every key under a different model identity (keep type + text hash).
+    other_fp = model_identity_fingerprint("other-model", "other@rev")
+    other_vectors = {
+        f"{other_fp}:{key.split(':', 2)[1]}:{key.split(':', 2)[2]}": value
+        for key, value in vectors_data.items()
+    }
+    from shiori.embedding_replay import file_sha256
+
+    manifest_data["vectors"]["sha256"] = "x" * 64
+    manifest_path, vectors_path = _write(tmp_path, manifest_data, other_vectors)
+    manifest_data["vectors"]["sha256"] = file_sha256(vectors_path)
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    with pytest.raises(ReplayError) as exc:
+        ReplayEmbedder.from_files(manifest_path, vectors_path)
+    assert exc.value.code == "replay_model_identity_mismatch"

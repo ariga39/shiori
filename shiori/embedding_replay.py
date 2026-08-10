@@ -45,6 +45,7 @@ class ReplayManifest:
     generator_revision: str
     model_id: str
     model_revision: str
+    model_key_identity: str
     dimension: int
     dtype: str
     normalized: bool
@@ -62,15 +63,30 @@ class ReplayManifest:
 
 
 def stable_text_hash(text: str) -> str:
-    """Return the stable per-input-type key used to look up a replayed vector."""
+    """Return the stable text component used to look up a replayed vector."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def composite_key(input_type: str, text: str) -> str:
-    """Return ``input_type:sha256(text)``, binding model+type+text identity."""
+def model_identity_fingerprint(model_id: str, model_revision: str) -> str:
+    """Return a stable short fingerprint binding the exact model identity.
+
+    The fingerprint is derived from the declared model id + revision so a
+    fixture produced by a different model (or a different pinned revision)
+    cannot collide with, or silently satisfy, this fixture's lookup keys.
+    """
+    return hashlib.sha256(f"{model_id}|{model_revision}".encode()).hexdigest()[:16]
+
+
+def composite_key(model_id: str, model_revision: str, input_type: str, text: str) -> str:
+    """Return ``<modelfp>:<input_type>:sha256(text)``.
+
+    Binds the model identity, the input type (document/query), and the canonical
+    text bytes into one key.  A lookup can only succeed against a fixture that
+    shares the same pinned model identity.
+    """
     if input_type not in INPUT_TYPES:
         raise ReplayError(f"invalid input_type: {input_type!r}", code="replay_invalid_input_type")
-    return f"{input_type}:{stable_text_hash(text)}"
+    return f"{model_identity_fingerprint(model_id, model_revision)}:{input_type}:{stable_text_hash(text)}"
 
 
 def file_sha256(path: Path) -> str:
@@ -142,12 +158,22 @@ def load_manifest(manifest_path: Path) -> ReplayManifest:
         raise ReplayError("replay manifest corpus input_type is invalid", code="replay_manifest_invalid")
     if _require_str(queries, "input_type") not in INPUT_TYPES:
         raise ReplayError("replay manifest queries input_type is invalid", code="replay_manifest_invalid")
+    model_id = _require_str(model, "id")
+    model_revision = _require_str(model, "revision")
+    declared_key_identity = _require_str(model, "key_identity")
+    expected_key_identity = model_identity_fingerprint(model_id, model_revision)
+    if declared_key_identity != expected_key_identity:
+        raise ReplayError(
+            "replay manifest model key identity does not match model id/revision",
+            code="replay_model_identity_mismatch",
+        )
     return ReplayManifest(
         schema=schema,
         generator_name=_require_str(generator, "name"),
         generator_revision=_require_str(generator, "revision"),
-        model_id=_require_str(model, "id"),
-        model_revision=_require_str(model, "revision"),
+        model_id=model_id,
+        model_revision=model_revision,
+        model_key_identity=declared_key_identity,
         dimension=dimension,
         dtype=_require_str(model, "dtype"),
         normalized=bool(model.get("normalized", False)),
@@ -202,7 +228,7 @@ class ReplayEmbedder:
     def embed(self, text: str, *, input_type: str = "document") -> list[float]:
         if not isinstance(text, str):
             raise ReplayError("replay embedding input must be text", code="invalid_replay_input")
-        key = composite_key(input_type, text)
+        key = composite_key(self._manifest.model_id, self._manifest.model_revision, input_type, text)
         vector = self._vectors.get(key)
         if vector is None:
             raise ReplayError(
@@ -223,16 +249,29 @@ class ReplayEmbedder:
 
 
 def _validate_vectors(manifest: ReplayManifest, vectors: dict[str, Any]) -> dict[str, list[float]]:
-    """Validate every fixture vector and reject malformed entries."""
+    """Validate every fixture vector and reject malformed entries.
+
+    Each key must be ``<modelfp>:<input_type>:sha256(text)`` where the model
+    fingerprint matches the manifest's declared model identity.  A fixture
+    produced by a different model (or revision) fails closed rather than being
+    silently consumed.
+    """
+    expected_model_fp = model_identity_fingerprint(manifest.model_id, manifest.model_revision)
     seen: set[str] = set()
     validated: dict[str, list[float]] = {}
     for key, value in vectors.items():
-        if not isinstance(key, str) or ":" not in key:
+        parts = key.split(":") if isinstance(key, str) else []
+        if len(parts) != 3:
             raise ReplayError(
                 "replay vector fixture contains an invalid composite key",
                 code="replay_vectors_invalid",
             )
-        input_type = key.split(":", 1)[0]
+        model_fp, input_type, _ = parts
+        if model_fp != expected_model_fp:
+            raise ReplayError(
+                "replay vector fixture model identity does not match the manifest",
+                code="replay_model_identity_mismatch",
+            )
         if input_type not in INPUT_TYPES:
             raise ReplayError(
                 "replay vector fixture contains an unknown input_type",

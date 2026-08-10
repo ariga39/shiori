@@ -6,6 +6,11 @@
     "version": 1
   },
   "generator": {
+    "libraries": {
+      "sentence_transformers": "5.7.0",
+      "torch": "2.13.0",
+      "transformers": "4.56.2"
+    },
     "library": "sentence-transformers",
     "model": "voyageai/voyage-4-nano@main",
     "model_id": "voyage-4-nano",
@@ -17,6 +22,7 @@
     "document_prompt": "Represent the document for retrieval:",
     "dtype": "float32",
     "id": "voyage-4-nano",
+    "key_identity": "0d1bcc385afad0d4",
     "normalized": true,
     "query_prompt": "Represent the query for retrieving supporting documents:",
     "revision": "voyageai/voyage-4-nano@main"
@@ -30,7 +36,7 @@
   "schema": "shiori-replay-fixture/v1",
   "vectors": {
     "count": 10,
-    "key_format": "input_type:sha256(text)",
-    "sha256": "09c8330d042689c08f47cf21da26391bfff5a82c9504efe305988b39ec2aad7b"
+    "key_format": "model_identity_fingerprint:input_type:sha256(text)",
+    "sha256": "379a993ac51fae8eb04f12748790e3a3cac93ed268c600e9dd95503ec6dab1c0"
   }
 }

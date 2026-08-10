@@ -44,6 +44,15 @@ def stable_text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def model_identity_fingerprint(model_id: str, model_revision: str) -> str:
+    """Short fingerprint binding the exact model id + pinned revision."""
+    return hashlib.sha256(f"{model_id}|{model_revision}".encode()).hexdigest()[:16]
+
+
+def composite_key(model_id: str, model_revision: str, input_type: str, text: str) -> str:
+    return f"{model_identity_fingerprint(model_id, model_revision)}:{input_type}:{stable_text_hash(text)}"
+
+
 def chunk_texts_from_sessions(sessions_dir: Path) -> list[str]:
     """Derive the exact chunk texts ingest would embed for these session files.
 
@@ -120,15 +129,16 @@ def main() -> int:
     model = SentenceTransformer(args.model, trust_remote_code=True)
 
     # Composite keys: model identity + input_type + canonical text hash.  A
-    # document and a query with the same text map to different vectors.
+    # document and a query with the same text map to different vectors, and a
+    # fixture from a different model identity cannot satisfy the lookup.
     vectors: dict[str, list[float]] = {}
     document_embeds = _embed(model, corpus_texts, input_type="document")
     query_embeds = _embed(model, query_texts, input_type="query")
     for text, vector in zip(corpus_texts, document_embeds, strict=True):
-        key = f"document:{stable_text_hash(text)}"
+        key = composite_key(MODEL_ID, MODEL_REVISION, "document", text)
         vectors[key] = vector
     for text, vector in zip(query_texts, query_embeds, strict=True):
-        key = f"query:{stable_text_hash(text)}"
+        key = composite_key(MODEL_ID, MODEL_REVISION, "query", text)
         vectors[key] = vector
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -144,6 +154,14 @@ def main() -> int:
         encoding="utf-8",
     )
 
+    import importlib.metadata
+
+    def _lib_version(name: str) -> str:
+        try:
+            return importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            return "unknown"
+
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "generator": {
@@ -152,6 +170,11 @@ def main() -> int:
             "model": MODEL_REVISION,
             "model_id": MODEL_ID,
             "library": "sentence-transformers",
+            "libraries": {
+                "sentence_transformers": _lib_version("sentence-transformers"),
+                "transformers": _lib_version("transformers"),
+                "torch": _lib_version("torch"),
+            },
         },
         "model": {
             "id": MODEL_ID,
@@ -161,6 +184,7 @@ def main() -> int:
             "normalized": NORMALIZED,
             "query_prompt": QUERY_PROMPT.strip(),
             "document_prompt": DOCUMENT_PROMPT.strip(),
+            "key_identity": model_identity_fingerprint(MODEL_ID, MODEL_REVISION),
         },
         "corpus": {
             "version": 1,
@@ -177,7 +201,7 @@ def main() -> int:
         "vectors": {
             "count": len(vectors),
             "sha256": hashlib.sha256(vectors_path.read_bytes()).hexdigest(),
-            "key_format": "input_type:sha256(text)",
+            "key_format": "model_identity_fingerprint:input_type:sha256(text)",
         },
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
