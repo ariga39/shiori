@@ -82,7 +82,10 @@ def _is_documented_example(category: str, match: str, *, source: str, path: str)
         }
     if category == "credential_assignment":
         value = match.split("=", 1)[-1].split(":", 1)[-1].strip().strip("\"'").lower()
-        return value in {"password", "secret", "xxx", "<redacted>", "shiori-ci-only"} or value.startswith(("test-", "fake-", "fixture-", "example-"))
+        # shiori-ci-only is the canonical CI-only password; shiyi-ci-only is
+        # retained because the pre-rename history (which cannot be rewritten)
+        # still contains that documented example.
+        return value in {"password", "secret", "xxx", "<redacted>", "shiori-ci-only", "shiyi-ci-only"} or value.startswith(("test-", "fake-", "fixture-", "example-"))
     return False
 
 

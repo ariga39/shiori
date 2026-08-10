@@ -50,6 +50,9 @@ def test_no_old_brand_outside_legacy_fixtures() -> None:
         ROOT / "shiori" / "migrations.py",
         # schema comparison notes reference the legacy ledger name
         ROOT / "shiori" / "schema_migrations" / "__init__.py",
+        # release audit retains the legacy CI-only example because the
+        # pre-rename git history (unrewritable) still contains it
+        ROOT / "tools" / "release_audit.py",
         # explicit legacy-compat tests
         ROOT / "tests" / "test_config_and_cli.py",
         ROOT / "tests" / "test_migrations.py",
