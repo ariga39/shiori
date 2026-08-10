@@ -50,9 +50,9 @@ def _run(
         "FAKE_CURRENT": current,
         "FAKE_MARKER": marker,
         "DROP_SENTINEL": str(sentinel),
-        "SHIYI_TEST_DATABASE_NAME": database,
-        "SHIYI_TEST_DATABASE_DSN": "postgresql://synthetic",
-        "SHIYI_TEST_DATABASE_MARKER": expected_marker,
+        "SHIORI_TEST_DATABASE_NAME": database,
+        "SHIORI_TEST_DATABASE_DSN": "postgresql://synthetic",
+        "SHIORI_TEST_DATABASE_MARKER": expected_marker,
         "GITHUB_RUN_ID": "123",
         "GITHUB_RUN_ATTEMPT": "1",
     }
@@ -67,7 +67,7 @@ def _run(
 
 
 def test_teardown_drops_only_matching_database_and_marker(tmp_path):
-    database = "shiyi_test_123_1_456"
+    database = "shiori_test_123_1_456"
     result, sentinel = _run(
         tmp_path,
         database=database,
@@ -80,7 +80,7 @@ def test_teardown_drops_only_matching_database_and_marker(tmp_path):
 
 
 def test_teardown_refuses_marker_mismatch(tmp_path):
-    database = "shiyi_test_123_1_456"
+    database = "shiori_test_123_1_456"
     result, sentinel = _run(
         tmp_path,
         database=database,
@@ -93,7 +93,7 @@ def test_teardown_refuses_marker_mismatch(tmp_path):
 
 
 def test_teardown_refuses_current_database_mismatch(tmp_path):
-    database = "shiyi_test_123_1_456"
+    database = "shiori_test_123_1_456"
     result, sentinel = _run(
         tmp_path,
         database=database,
@@ -106,7 +106,7 @@ def test_teardown_refuses_current_database_mismatch(tmp_path):
 
 
 def test_teardown_refuses_database_outside_job_namespace(tmp_path):
-    database = "shiyi_test_999_1_456"
+    database = "shiori_test_999_1_456"
     result, sentinel = _run(
         tmp_path,
         database=database,
@@ -119,7 +119,7 @@ def test_teardown_refuses_database_outside_job_namespace(tmp_path):
 
 
 def test_teardown_refuses_malformed_marker(tmp_path):
-    database = "shiyi_test_123_1_456"
+    database = "shiori_test_123_1_456"
     result, sentinel = _run(
         tmp_path,
         database=database,

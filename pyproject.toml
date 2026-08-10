@@ -3,7 +3,7 @@ requires = ["setuptools>=75,<80"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "shiyi"
+name = "shiori"
 version = "0.1.0"
 description = "Searchable long-term memory for AI agents"
 readme = "README.md"
@@ -27,10 +27,10 @@ dev = [
 ]
 
 [project.scripts]
-shiyi = "shiyi.cli:main"
+shiori = "shiori.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["shiyi*"]
+include = ["shiori*"]
 
 [tool.setuptools]
 py-modules = ["ingest", "ingest_discord", "ingest_hermes", "query", "mcp_server"]
@@ -51,7 +51,7 @@ ignore = ["E501"]
 
 [tool.pyright]
 include = [
-  "shiyi",
+  "shiori",
   "ingest.py",
   "ingest_discord.py",
   "ingest_hermes.py",

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${SHIYI_TEST_DATABASE_NAME:-}" ]]; then
+if [[ -z "${SHIORI_TEST_DATABASE_NAME:-}" ]]; then
   exit 0
 fi
 
-: "${SHIYI_TEST_DATABASE_DSN:?missing SHIYI_TEST_DATABASE_DSN}"
-: "${SHIYI_TEST_DATABASE_MARKER:?missing SHIYI_TEST_DATABASE_MARKER}"
+: "${SHIORI_TEST_DATABASE_DSN:?missing SHIORI_TEST_DATABASE_DSN}"
+: "${SHIORI_TEST_DATABASE_MARKER:?missing SHIORI_TEST_DATABASE_MARKER}"
 : "${GITHUB_RUN_ID:?missing GITHUB_RUN_ID}"
 : "${GITHUB_RUN_ATTEMPT:?missing GITHUB_RUN_ATTEMPT}"
 
-database="${SHIYI_TEST_DATABASE_NAME}"
-marker="${SHIYI_TEST_DATABASE_MARKER}"
-if [[ ! "${database}" =~ ^shiyi_test_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_[0-9]+$ ]]; then
+database="${SHIORI_TEST_DATABASE_NAME}"
+marker="${SHIORI_TEST_DATABASE_MARKER}"
+if [[ ! "${database}" =~ ^shiori_test_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_[0-9]+$ ]]; then
   echo "teardown refused: database is outside this job namespace" >&2
   exit 1
 fi
@@ -22,15 +22,15 @@ if [[ ! "${marker}" =~ ^ci-[0-9]+-[0-9]+-[0-9]+$ ]]; then
 fi
 
 current_database="$(
-  psql "${SHIYI_TEST_DATABASE_DSN}" \
+  psql "${SHIORI_TEST_DATABASE_DSN}" \
     --no-psqlrc --set ON_ERROR_STOP=1 --tuples-only --no-align \
     --command 'SELECT current_database();'
 )"
 actual_marker="$(
-  psql "${SHIYI_TEST_DATABASE_DSN}" \
+  psql "${SHIORI_TEST_DATABASE_DSN}" \
     --no-psqlrc --set ON_ERROR_STOP=1 \
     --tuples-only --no-align \
-    --command "SELECT marker FROM shiyi_test_guard WHERE marker = '${marker}' LIMIT 1;"
+    --command "SELECT marker FROM shiori_test_guard WHERE marker = '${marker}' LIMIT 1;"
 )"
 
 if [[ "${current_database}" != "${database}" || "${actual_marker}" != "${marker}" ]]; then
@@ -38,5 +38,5 @@ if [[ "${current_database}" != "${database}" || "${actual_marker}" != "${marker}
   exit 1
 fi
 
-dropdb --if-exists --host 127.0.0.1 --port 5432 --username shiyi_ci "${database}"
+dropdb --if-exists --host 127.0.0.1 --port 5432 --username shiori_ci "${database}"
 echo "isolated database teardown verified"

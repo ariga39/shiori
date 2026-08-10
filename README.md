@@ -1,6 +1,6 @@
-# shiyi (拾遗)
+# shiori (拾遗)
 
-Searchable long-term memory for AI agents. Shiyi ingests explicitly selected
+Searchable long-term memory for AI agents. Shiori ingests explicitly selected
 session or archive sources into PostgreSQL + pgvector, then exposes hybrid
 vector/BM25 search through a CLI and a read-only MCP server.
 
@@ -11,7 +11,7 @@ supported; `uv` is used in this repository for reproducible development.
 
 ```bash
 uv sync --locked --extra dev
-uv run shiyi --help
+uv run shiori --help
 ```
 
 The package can also be built and installed by ordinary PEP 517 tooling:
@@ -28,25 +28,25 @@ paths. A command must identify its source and production embedding settings.
 Configuration precedence is:
 
 1. explicit keyword values used by the Python API;
-2. `SHIYI_*` environment variables;
-3. the selected JSON/TOML file (`--config` or `SHIYI_CONFIG_FILE`);
+2. `SHIORI_*` environment variables;
+3. the selected JSON/TOML file (`--config` or `SHIORI_CONFIG_FILE`);
 4. safe numeric defaults for chunking, retries, and lock IDs only.
 
 Minimal environment example (use a secret manager or a mode-0600 file for
 the key; never commit or paste it):
 
 ```bash
-export SHIYI_SESSIONS_DIR=/srv/shiyi/sessions
-export SHIYI_DATABASE_DSN='postgresql://user:password@db.example/shiyi'
-export SHIYI_EMBEDDING_PROVIDER=voyage
-export SHIYI_VOYAGE_API_KEY='provided-by-your-secret-manager'
-export SHIYI_VOYAGE_MODEL=voyage-4-large
-export SHIYI_EMBED_DIM=1024
+export SHIORI_SESSIONS_DIR=/srv/shiori/sessions
+export SHIORI_DATABASE_DSN='postgresql://user:password@db.example/shiori'
+export SHIORI_EMBEDDING_PROVIDER=voyage
+export SHIORI_VOYAGE_API_KEY='provided-by-your-secret-manager'
+export SHIORI_VOYAGE_MODEL=voyage-4-large
+export SHIORI_EMBED_DIM=1024
 ```
 
 Instead of putting a key in the environment, set
-`SHIYI_VOYAGE_KEY_FILE=/secure/shiyi/voyage.key`. PostgreSQL may use a DSN or
-an explicit `SHIYI_PG_CRED` key/value file. Diagnostics redact API keys and
+`SHIORI_VOYAGE_KEY_FILE=/secure/shiori/voyage.key`. PostgreSQL may use a DSN or
+an explicit `SHIORI_PG_CRED` key/value file. Diagnostics redact API keys and
 DSN passwords.
 
 For an isolated local or CI smoke run only, the provider can be explicitly
@@ -54,14 +54,14 @@ replaced by deterministic local vectors. This is opt-in and never sends
 content over the network:
 
 ```bash
-export SHIYI_EMBEDDING_PROVIDER=fake
-export SHIYI_ALLOW_FAKE_EMBEDDINGS=true
-export SHIYI_ENVIRONMENT=development
-export SHIYI_VOYAGE_MODEL=shiyi-fake-v1
-export SHIYI_EMBED_DIM=1024
+export SHIORI_EMBEDDING_PROVIDER=fake
+export SHIORI_ALLOW_FAKE_EMBEDDINGS=true
+export SHIORI_ENVIRONMENT=development
+export SHIORI_VOYAGE_MODEL=shiori-fake-v1
+export SHIORI_EMBED_DIM=1024
 ```
 
-The fake model must use the reserved `shiyi-fake-*` namespace. Search filters
+The fake model must use the reserved `shiori-fake-*` namespace. Search filters
 both model and vector dimension, and production rejects that namespace, so
 fake and Voyage vectors cannot be silently mixed. Do not use the fake provider
 for production data or performance evaluation.
@@ -76,12 +76,12 @@ The source is selected on every ingest invocation; no source is silently
 discovered:
 
 ```bash
-shiyi ingest --source sessions
-shiyi ingest --source hermes
-shiyi ingest --source discord --file /srv/shiyi/archive/channel.jsonl
-shiyi ingest --source sessions --dry-run
-shiyi query 'what did we decide about X?' --limit 5
-shiyi serve
+shiori ingest --source sessions
+shiori ingest --source hermes
+shiori ingest --source discord --file /srv/shiori/archive/channel.jsonl
+shiori ingest --source sessions --dry-run
+shiori query 'what did we decide about X?' --limit 5
+shiori serve
 ```
 
 `--dry-run` parses and chunks the selected source without opening PostgreSQL
@@ -96,7 +96,7 @@ return stable error codes without backend text or credentials.
 
 The original script entry points remain as compatibility wrappers and accept
 the same `--config` and `--legacy-openclaw` switches. New deployments should
-use the installed `shiyi` command.
+use the installed `shiori` command.
 
 ## PostgreSQL + pgvector
 
@@ -106,16 +106,16 @@ base is pinned to
 Compose runs that same local image; it does not pull or publish an image and
 uses a project-scoped named volume for PostgreSQL data. The volume is neither
 external nor assigned a shared fixed name; Compose derives its name from the
-project name. Set `SHIYI_COMPOSE_PROJECT` when you need an explicit local
-namespace, and use `SHIYI_PG_PORT` to change the host port. The deployment does
-not accept a host `SHIYI_PG_DATA_DIR` bind path, because arbitrary host UID
+project name. Set `SHIORI_COMPOSE_PROJECT` when you need an explicit local
+namespace, and use `SHIORI_PG_PORT` to change the host port. The deployment does
+not accept a host `SHIORI_PG_DATA_DIR` bind path, because arbitrary host UID
 ownership is not portable for the non-root database image.
 
 ```bash
-SHIYI_PG_CRED=/secure/shiyi/postgres.env \
-  SHIYI_COMPOSE_PROJECT=shiyi-local \
+SHIORI_PG_CRED=/secure/shiori/postgres.env \
+  SHIORI_COMPOSE_PROJECT=shiori-local \
   ./deploy/run.sh up -d --build
-shiyi db migrate        # apply forward-only migrations (recommended)
+shiori db migrate        # apply forward-only migrations (recommended)
 ```
 
 The first `up` must include `--build` so the compose path exercises the pinned
@@ -123,23 +123,23 @@ Dockerfile. The named volume keeps rows across container restarts and is
 removed only when you explicitly use `docker compose down --volumes` for the
 same project. The resulting container runs as the non-root `postgres` user and
 preloads `vector`. For portable data export or migration to another project,
-use `shiyi db backup` and `shiyi db restore`; do not copy a host data directory.
+use `shiori db backup` and `shiori db restore`; do not copy a host data directory.
 CI runs the same compose build/runtime smoke and scans that exact local image;
 it never pushes the image.
 
-Schema is managed by **forward-only migrations** (`shiyi/schema_migrations/`,
-recorded in `shiyi_schema_migrations`). Run `shiyi db migrate` on a fresh or
+Schema is managed by **forward-only migrations** (`shiori/schema_migrations/`,
+recorded in `shiori_schema_migrations`). Run `shiori db migrate` on a fresh or
 existing database; it applies only unapplied migrations, each in its own
-transaction and serialized by a PostgreSQL advisory lock. `shiyi db health`
+transaction and serialized by a PostgreSQL advisory lock. `shiori db health`
 reports repository version/table/extension status and distinguishes
 `uninitialized / partial / current / drifted / ahead`; a database ahead of the
-code head rejects writes. `shiyi db backup <path>` writes a pg_dump file (with
+code head rejects writes. `shiori db backup <path>` writes a pg_dump file (with
 a sidecar manifest+digest) via 0600 temp + atomic rename and refuses overwrite
-or symlink targets. `shiyi db restore <src> --target <newdb>`
+or symlink targets. `shiori db restore <src> --target <newdb>`
 restores into a freshly created, random-marker staging database only — it never
 overwrites the current database and returns a password-free DSN for you to
 switch to. `schema.sql` remains a legacy one-shot bootstrap reference. When an
-existing database has the complete canonical legacy structure, `shiyi db
+existing database has the complete canonical legacy structure, `shiori db
 migrate` verifies it and records the initial migration without replaying DDL;
 partial or drifted legacy structures fail closed. New installations and
 upgrades use the CLI migration command above. CI separately exercises the
@@ -155,16 +155,16 @@ The default test run is safe without PostgreSQL: database tests skip unless
 all three opt-in variables are present:
 
 ```text
-SHIYI_TEST_DATABASE_DSN
-SHIYI_TEST_DATABASE_NAME
-SHIYI_TEST_DATABASE_MARKER
+SHIORI_TEST_DATABASE_DSN
+SHIORI_TEST_DATABASE_NAME
+SHIORI_TEST_DATABASE_MARKER
 ```
 
 When enabled, the test fixture verifies both the connected database name and
 a marker row before any test cleanup. It deletes only rows in its own reserved
 `test-<run-id>` namespace. CI creates a random database and marker on its
 ephemeral PostgreSQL service, applies the checked-in migrations through
-`shiyi db migrate`, runs the same suite, and separately upgrades a synthetic
+`shiori db migrate`, runs the same suite, and separately upgrades a synthetic
 `schema.sql` database through the same CLI command. The legacy fixture is
 never used as a shortcut for the fresh-database path.
 Embedding unit tests use deterministic synthetic vectors; production never
@@ -184,11 +184,11 @@ isolated PostgreSQL database. The harness is synthetic and does not read host
 credentials or real source data:
 
 ```bash
-SHIYI_TEST_DATABASE_MARKER=ci-local-1-1-1 \
-  tools/clean_machine_smoke.sh --cli /path/to/venv/bin/shiyi \
+SHIORI_TEST_DATABASE_MARKER=ci-local-1-1-1 \
+  tools/clean_machine_smoke.sh --cli /path/to/venv/bin/shiori \
   --python /path/to/venv/bin/python \
-  --dsn postgresql://user@127.0.0.1:5432/shiyi_test \
-  --database-name shiyi_test --workdir /tmp/shiyi-smoke
+  --dsn postgresql://user@127.0.0.1:5432/shiori_test \
+  --database-name shiori_test --workdir /tmp/shiori-smoke
 ```
 
 Release evidence is separated into these gates:

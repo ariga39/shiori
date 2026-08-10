@@ -11,7 +11,7 @@
 ## 1. 项目概述与目标
 
 > 当前安装与运行合同以根目录 `README.md`、`pyproject.toml`、
-> `shiyi.config.Settings` 和 `docs/CONFIGURATION.md` 为准。本文保留早期
+> `shiori.config.Settings` 和 `docs/CONFIGURATION.md` 为准。本文保留早期
 > 运行时设计中的路径/部署记录；任何 OpenClaw/Hermes 路径在当前代码中
 > 只通过显式 `--legacy-openclaw` 迁移开关启用，不是默认配置。
 
@@ -346,12 +346,12 @@ score *= decay
 
 ### 6.1 数据库与 Docker
 
-- **容器重建剧本（`deploy/docker-compose.yml` + `deploy/run.sh`）：** compose 从仓库 Dockerfile 构建 pinned `pgvector/pg17` 镜像，使用按 Compose project 命名空间隔离的 named volume，端口 `127.0.0.1:5433:5432`，`restart: unless-stopped`。`POSTGRES_DB/USER/PASSWORD` 不硬编码明文，由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或环境变量注入；可选的 `SHIYI_COMPOSE_PROJECT` 只用于选择本地 project 命名空间。首次启动命令：`SHIYI_PG_CRED=/secure/shiyi/postgres.env SHIYI_COMPOSE_PROJECT=shiyi-local ./deploy/run.sh up -d --build`。
+- **容器重建剧本（`deploy/docker-compose.yml` + `deploy/run.sh`）：** compose 从仓库 Dockerfile 构建 pinned `pgvector/pg17` 镜像，使用按 Compose project 命名空间隔离的 named volume，端口 `127.0.0.1:5433:5432`，`restart: unless-stopped`。`POSTGRES_DB/USER/PASSWORD` 不硬编码明文，由 `deploy/run.sh` 从显式 `SHIORI_PG_CRED` 文件或环境变量注入；可选的 `SHIORI_COMPOSE_PROJECT` 只用于选择本地 project 命名空间。首次启动命令：`SHIORI_PG_CRED=/secure/shiori/postgres.env SHIORI_COMPOSE_PROJECT=shiori-local ./deploy/run.sh up -d --build`。
 - **`shared_preload_libraries='vector'` 必须配置：** Dockerfile 的 CMD 在服务启动时预加载 vector，使 `hnsw.ef_search` GUC 在首个会话前注册；compose 不覆盖该 CMD。CI 的 runtime smoke 会检查 CMD、`SHOW shared_preload_libraries`、扩展写入、非 root uid 与重启后的数据。
-- **回滚与导出：** 同一 project 的 named volume 可跨容器重建保留数据；只有显式 `docker compose down --volumes` 才删除它。跨 project 或升级前使用 `shiyi db backup <path>` 与 `shiyi db restore <src> --target <newdb>`，不要复制或绑定宿主数据目录。该路径不使用外部或预命名 volume，也不回滚到缺少 vector preload 的旧容器。
+- **回滚与导出：** 同一 project 的 named volume 可跨容器重建保留数据；只有显式 `docker compose down --volumes` 才删除它。跨 project 或升级前使用 `shiori db backup <path>` 与 `shiori db restore <src> --target <newdb>`，不要复制或绑定宿主数据目录。该路径不使用外部或预命名 volume，也不回滚到缺少 vector preload 的旧容器。
 - 需在数据库中启用扩展：`pgvector`（`vector` 类型）、`pg_trgm`（query 回退用）。
-- 表结构的历史快照保留在仓库根 `schema.sql`（`session_chunks`、`ingestion_state`、扩展、索引），但运行时换库/重建统一执行 `shiyi db migrate`。完整、未登记的 legacy 结构会先做结构校验并登记初始 migration；部分或漂移结构拒绝升级。其中 `timestamp_start` / `timestamp_end` 为 **nullable**；主路径下时间戳解析失败会写入文件 mtime 兜底（`fallback_ts`），仅当 `fallback_ts=None` 时才存 `NULL`（见 §5.5）。
-- 连接信息由 `deploy/run.sh` 从显式 `SHIYI_PG_CRED` 文件或 `POSTGRES_*` 环境变量注入，格式为 `key=value`，含 `dbname` / `user` / `password`；不会读取 home-directory fallback。
+- 表结构的历史快照保留在仓库根 `schema.sql`（`session_chunks`、`ingestion_state`、扩展、索引），但运行时换库/重建统一执行 `shiori db migrate`。完整、未登记的 legacy 结构会先做结构校验并登记初始 migration；部分或漂移结构拒绝升级。其中 `timestamp_start` / `timestamp_end` 为 **nullable**；主路径下时间戳解析失败会写入文件 mtime 兜底（`fallback_ts`），仅当 `fallback_ts=None` 时才存 `NULL`（见 §5.5）。
+- 连接信息由 `deploy/run.sh` 从显式 `SHIORI_PG_CRED` 文件或 `POSTGRES_*` 环境变量注入，格式为 `key=value`，含 `dbname` / `user` / `password`；不会读取 home-directory fallback。
 - Voyage API key 位于 `~/.openclaw/credentials/voyage-api-key.txt`（`ingest.py:30`）。
 
 ### 6.2 凭据管理

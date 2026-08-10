@@ -25,7 +25,7 @@ def deterministic_embedding(text: str, *, dimension: int) -> list[float]:
 
     values: list[float] = []
     for index in range(dimension):
-        digest = hashlib.sha256(f"shiyi-fake-v1:{index}:".encode() + text.encode("utf-8")).digest()
+        digest = hashlib.sha256(f"shiori-fake-v1:{index}:".encode() + text.encode("utf-8")).digest()
         raw = int.from_bytes(digest[:8], "big") / float(1 << 64)
         values.append((raw * 2.0) - 1.0)
     norm = math.sqrt(sum(value * value for value in values))

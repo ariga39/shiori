@@ -1,4 +1,4 @@
-# shiyi v0.1.0 private release-candidate checklist
+# shiori v0.1.0 private release-candidate checklist
 
 This is a release-candidate checklist, not a release authorization. The
 repository remains private until the owner makes a separate visibility
@@ -22,8 +22,8 @@ checklist.
 - [ ] `uv sync --locked --extra dev`, `uv lock --check`, Ruff, Pyright, and the
       full unit suite pass.
 - [ ] Hosted PostgreSQL/pgvector service passes client/server major parity,
-      vector preload, isolated marker/identity checks, and `shiyi db migrate`
-      followed by `shiyi db health`.
+      vector preload, isolated marker/identity checks, and `shiori db migrate`
+      followed by `shiori db health`.
 - [ ] A synthetic `schema.sql` database is upgraded by the same CLI command;
       complete legacy structure is adopted without replaying DDL and partial
       or drifted structure fails closed.
@@ -52,7 +52,7 @@ checklist.
       settings are explicit; no home-directory or host-credential fallback is
       used.
 - [ ] Deterministic fake embeddings require both explicit development/test
-      environment and opt-in, use the reserved `shiyi-fake-*` model namespace,
+      environment and opt-in, use the reserved `shiori-fake-*` model namespace,
       and are disclosed as local/no-external-call.
 - [ ] Voyage and fake vectors are isolated by provider/model/dimension
       contract; incompatible rows are excluded or rejected structurally.

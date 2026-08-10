@@ -8,12 +8,12 @@
 
 services:
   session-memory-pg:
-    image: shiyi-pgvector:local
+    image: shiori-pgvector:local
     build:
       context: ..
       dockerfile: Dockerfile
     ports:
-      - "127.0.0.1:${SHIYI_PG_PORT:-5433}:5432"
+      - "127.0.0.1:${SHIORI_PG_PORT:-5433}:5432"
     volumes:
       - session-memory-pgdata:/var/lib/postgresql/data
     environment:
@@ -25,4 +25,4 @@ services:
 volumes:
   session-memory-pgdata:
     labels:
-      com.shiyi.scope: project-owned
+      com.shiori.scope: project-owned

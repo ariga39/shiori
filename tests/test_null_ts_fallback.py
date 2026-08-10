@@ -83,11 +83,11 @@ def test_null_ts_decay_discriminates_by_stored_mtime(db, monkeypatch):
     # older file's chunk is ranked below the newer file's chunk.
     recent_sid = prefix + "-recent"
     old_sid = prefix + "-old"
-    _insert_fallback(conn, recent_sid, "shiyi_nts_recent_x", FAR_EMB, now)
-    _insert_fallback(conn, old_sid, "shiyi_nts_old_x", QUERY_EMB, now - timedelta(days=120))
+    _insert_fallback(conn, recent_sid, "shiori_nts_recent_x", FAR_EMB, now)
+    _insert_fallback(conn, old_sid, "shiori_nts_old_x", QUERY_EMB, now - timedelta(days=120))
 
     res = query.search("zzqx no-bm25-match 9", limit=300)
     mine = [r for r in res if r[3] in (recent_sid, old_sid)]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
-    assert contents.index("shiyi_nts_recent_x") < contents.index("shiyi_nts_old_x")
+    assert contents.index("shiori_nts_recent_x") < contents.index("shiori_nts_old_x")

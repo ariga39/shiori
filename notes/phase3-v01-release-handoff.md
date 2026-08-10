@@ -18,7 +18,7 @@ this task.
   historical parents, not acceptance objects, and their head-specific CI or
   peer evidence must not be reused.
 - Branch: `phase3/v01-release-shizuka`.
-- Worktree: `/home/raft/shiyi-phase3-release-shizuka`.
+- Worktree: `/home/raft/shiori-phase3-release-shizuka`.
 - The candidate must be checked for a clean worktree and exact ancestry before
   publication. A changed candidate invalidates all head-specific evidence.
 
@@ -33,14 +33,14 @@ the release checklist. Existing migration files and prior search/privacy
 semantics were not rewritten.
 
 The deterministic provider requires all of: `provider=fake`, explicit
-`SHIYI_ALLOW_FAKE_EMBEDDINGS=true`, `SHIYI_ENVIRONMENT=development|test`, an
-explicit reserved `shiyi-fake-*` model, and dimension 1024. It uses no network
+`SHIORI_ALLOW_FAKE_EMBEDDINGS=true`, `SHIORI_ENVIRONMENT=development|test`, an
+explicit reserved `shiori-fake-*` model, and dimension 1024. It uses no network
 or credentials and is disclosed as local-only. Query and ingest both bind
 provider/model/dimension, so fake and production vectors cannot mix; production
 rejects the fake namespace. Provider/privacy output is redacted and never
 returns a key, DSN, or path.
 
-The explicit `SHIYI_PG_CRED` key/value file path is validated at the typed
+The explicit `SHIORI_PG_CRED` key/value file path is validated at the typed
 configuration boundary and returned as safe `psycopg2.connect(**credentials)`
 parameters, while a direct DSN remains `{"dsn": ...}`. The installed CLI and
 privacy/query callers therefore do not index a raw mapping as if it contained
@@ -67,7 +67,7 @@ Missing, empty, ambiguous, malformed, or mismatched identity data fails closed;
 the verifier is packaged and covered by script-level counterexamples.
 
 The retained container delivery now has one runtime path: `deploy/docker-compose.yml`
-builds the pinned `Dockerfile` and runs its local `shiyi-pgvector:local` image;
+builds the pinned `Dockerfile` and runs its local `shiori-pgvector:local` image;
 there is no optional-only image path. The compose service uses a fresh
 project-scoped named volume, never a host bind path or external/fixed volume.
 `tools/container_runtime_smoke.sh` uses a fresh project name to verify
@@ -75,8 +75,8 @@ empty-volume initialization, readiness, vector extension/write, restart
 persistence, non-root execution, inherited entrypoint/CMD and preload, and
 removal of only the project-labeled resources. The container scan consumes the
 same compose-built image tag after its immutable image ID is recorded; the image
-is never pushed. Portable data movement is through `shiyi db backup` and
-`shiyi db restore`, not host-directory copying.
+is never pushed. Portable data movement is through `shiori db backup` and
+`shiori db restore`, not host-directory copying.
 
 ## Evidence ledger
 
@@ -87,7 +87,7 @@ release gate.
 | --- | --- | --- |
 | locked install, Ruff, Pyright, unit tests | `163 passed, 103 skipped`; skips are explicit no-local-PostgreSQL classes; Ruff/Pyright/lock/compileall/diff-check clean | terminal green |
 | PostgreSQL/pgvector, client/server major parity, vector preload, isolated DB marker/identity | not available on the author workstation | real service, no required skips |
-| fresh `shiyi db migrate`/`db health` | command is wired into CI and clean-machine smoke | terminal green |
+| fresh `shiori db migrate`/`db health` | command is wired into CI and clean-machine smoke | terminal green |
 | legacy schema adoption and partial/drift rejection | synthetic tests and `tools/legacy_schema_upgrade_smoke.sh` | terminal green |
 | wheel/sdist clean install and README lifecycle | harness is packaged and invoked with the installed wheel, then sdist | terminal green |
 | MCP stdio tool-list/search | harness is packaged; local execution requires the isolated DB | terminal green |

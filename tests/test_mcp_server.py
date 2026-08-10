@@ -68,16 +68,16 @@ def test_search_returns_structured_dicts(db, server, monkeypatch):
     conn, prefix = db
     sid = prefix + "-mcp"
     now = datetime.now(UTC)
-    _insert(conn, sid, "shiyi_test_mcp_target", QUERY_EMB, now)
+    _insert(conn, sid, "shiori_test_mcp_target", QUERY_EMB, now)
     monkeypatch.setattr(query, "embed_query", lambda q: QUERY_EMB)
     monkeypatch.setattr(query, "get_db", lambda: _NoCloseConn(conn))
 
-    result = _call(server, "search", {"query": "shiyi_test_mcp", "limit": 10})
+    result = _call(server, "search", {"query": "shiori_test_mcp", "limit": 10})
     data = _parse(result)
     assert data["count"] >= 1
     for r in data["results"]:
         assert {"content", "score", "timestamp", "session_id", "source_type"} <= set(r)
-    assert any(r["content"] == "shiyi_test_mcp_target" for r in data["results"])
+    assert any(r["content"] == "shiori_test_mcp_target" for r in data["results"])
 
 
 def test_limit_is_clamped_to_max(server, monkeypatch):

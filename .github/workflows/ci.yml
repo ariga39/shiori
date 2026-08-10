@@ -13,18 +13,18 @@ jobs:
       # Synthetic service credentials only; no repository or user credential
       # is used by CI.  The test DSN itself omits the password and psycopg2
       # receives it through this job-local environment variable.
-      PGPASSWORD: shiyi-ci-only
+      PGPASSWORD: shiori-ci-only
     services:
       postgres:
         image: pgvector/pgvector@sha256:7ae6051efd0e60444282c27c7e141af07f322ce033300e727a49c3dd11075e38
         env:
-          POSTGRES_USER: shiyi_ci
-          POSTGRES_PASSWORD: shiyi-ci-only
+          POSTGRES_USER: shiori_ci
+          POSTGRES_PASSWORD: shiori-ci-only
           POSTGRES_DB: postgres
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U shiyi_ci -d postgres"
+          --health-cmd "pg_isready -U shiori_ci -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -51,8 +51,8 @@ jobs:
           set -euo pipefail
           uv lock --check
           uv export --locked --all-groups --no-emit-project --format requirements-txt \
-            > "${RUNNER_TEMP}/shiyi-requirements.txt"
-          uv run pip-audit --requirement "${RUNNER_TEMP}/shiyi-requirements.txt" \
+            > "${RUNNER_TEMP}/shiori-requirements.txt"
+          uv run pip-audit --requirement "${RUNNER_TEMP}/shiori-requirements.txt" \
             --strict --progress-spinner off
 
       - name: Check direct dependency licenses
@@ -60,7 +60,7 @@ jobs:
 
       - name: Compile project Python surface
         run: >-
-          uv run python -m compileall -q shiyi ingest.py ingest_hermes.py
+          uv run python -m compileall -q shiori ingest.py ingest_hermes.py
           ingest_discord.py query.py mcp_server.py tests tools
 
       - name: Lint project
@@ -101,7 +101,7 @@ jobs:
           for tool in pg_dump pg_restore; do
             client_major="$("${tool}" --version | sed -E 's/.* ([0-9]+)\..*/\1/')"
             server_major="$(
-              psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+              psql --host 127.0.0.1 --port 5432 --username shiori_ci --dbname postgres \
                 --set ON_ERROR_STOP=1 --tuples-only --no-align \
                 --command 'SHOW server_version_num;' | cut -c1-2
             )"
@@ -115,7 +115,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+          psql --host 127.0.0.1 --port 5432 --username shiori_ci --dbname postgres \
             --set ON_ERROR_STOP=1 \
             --command "ALTER SYSTEM SET shared_preload_libraries = 'vector';"
 
@@ -130,7 +130,7 @@ jobs:
 
           ready=false
           for _ in {1..60}; do
-            if pg_isready --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres >/dev/null; then
+            if pg_isready --host 127.0.0.1 --port 5432 --username shiori_ci --dbname postgres >/dev/null; then
               ready=true
               break
             fi
@@ -142,7 +142,7 @@ jobs:
           fi
 
           loaded="$(
-            psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+            psql --host 127.0.0.1 --port 5432 --username shiori_ci --dbname postgres \
               --set ON_ERROR_STOP=1 --tuples-only --no-align \
               --command 'SHOW shared_preload_libraries;'
           )"
@@ -155,37 +155,37 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          db="shiyi_test_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${RANDOM}"
+          db="shiori_test_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_${RANDOM}"
           marker="ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
           if [[ ! "${marker}" =~ ^ci-[0-9]+-[0-9]+-[0-9]+$ ]]; then
             echo "refusing malformed test database marker" >&2
             exit 1
           fi
-          psql --host 127.0.0.1 --port 5432 --username shiyi_ci --dbname postgres \
+          psql --host 127.0.0.1 --port 5432 --username shiori_ci --dbname postgres \
             --set ON_ERROR_STOP=1 --command "CREATE DATABASE \"${db}\";"
-          dsn="postgresql://shiyi_ci@127.0.0.1:5432/${db}"
+          dsn="postgresql://shiori_ci@127.0.0.1:5432/${db}"
           psql "${dsn}" --set ON_ERROR_STOP=1 \
-            --command "CREATE TABLE shiyi_test_guard (marker text PRIMARY KEY); INSERT INTO shiyi_test_guard(marker) VALUES ('${marker}');"
+            --command "CREATE TABLE shiori_test_guard (marker text PRIMARY KEY); INSERT INTO shiori_test_guard(marker) VALUES ('${marker}');"
           {
-            echo "SHIYI_DATABASE_DSN=${dsn}"
-            echo "SHIYI_TEST_DATABASE_DSN=${dsn}"
-            echo "SHIYI_TEST_DATABASE_NAME=${db}"
-            echo "SHIYI_TEST_DATABASE_MARKER=${marker}"
+            echo "SHIORI_DATABASE_DSN=${dsn}"
+            echo "SHIORI_TEST_DATABASE_DSN=${dsn}"
+            echo "SHIORI_TEST_DATABASE_NAME=${db}"
+            echo "SHIORI_TEST_DATABASE_MARKER=${marker}"
           } >> "${GITHUB_ENV}"
 
       - name: Apply migrations and verify repository health
         run: |
-          uv run shiyi db migrate
-          uv run shiyi db health
+          uv run shiori db migrate
+          uv run shiori db health
 
       - name: Verify legacy bootstrap upgrade
         shell: bash
         run: |
           set -euo pipefail
-          cli="$(uv run python -c 'import shutil; print(shutil.which("shiyi") or "")')"
+          cli="$(uv run python -c 'import shutil; print(shutil.which("shiori") or "")')"
           tools/legacy_schema_upgrade_smoke.sh \
             --cli "${cli}" \
-            --admin-dsn "postgresql://shiyi_ci@127.0.0.1:5432/postgres"
+            --admin-dsn "postgresql://shiori_ci@127.0.0.1:5432/postgres"
 
       - name: Run tests
         run: uv run pytest -q
@@ -201,14 +201,14 @@ jobs:
           trap 'rm -rf "${smoke_dir}"' EXIT
           uv venv --python 3.12 "${smoke_dir}/venv"
           uv pip install --python "${smoke_dir}/venv/bin/python" dist/*.whl
-          cli="${smoke_dir}/venv/bin/shiyi"
+          cli="${smoke_dir}/venv/bin/shiori"
           "${cli}" --help >/dev/null
-          SHIYI_TEST_DATABASE_MARKER="${SHIYI_TEST_DATABASE_MARKER}" \
+          SHIORI_TEST_DATABASE_MARKER="${SHIORI_TEST_DATABASE_MARKER}" \
             tools/clean_machine_smoke.sh \
               --cli "${cli}" \
               --python "${smoke_dir}/venv/bin/python" \
-              --dsn "${SHIYI_TEST_DATABASE_DSN}" \
-              --database-name "${SHIYI_TEST_DATABASE_NAME}" \
+              --dsn "${SHIORI_TEST_DATABASE_DSN}" \
+              --database-name "${SHIORI_TEST_DATABASE_NAME}" \
               --workdir "${smoke_dir}/wheel"
           uv pip install --reinstall --python "${smoke_dir}/venv/bin/python" dist/*.tar.gz
           "${cli}" --help >/dev/null
@@ -222,7 +222,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          evidence_dir="${RUNNER_TEMP}/shiyi-failure-evidence"
+          evidence_dir="${RUNNER_TEMP}/shiori-failure-evidence"
           mkdir -p "${evidence_dir}"
           cat > "${evidence_dir}/summary.json" <<'JSON'
           {"status":"failed","raw_logs_uploaded":false,"secret_matches":"counts_only","retention_days":1}
@@ -232,8 +232,8 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: shiyi-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/shiyi-failure-evidence
+          name: shiori-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/shiori-failure-evidence
           if-no-files-found: error
           retention-days: 1
 
@@ -248,10 +248,10 @@ jobs:
     permissions:
       contents: read
     env:
-      POSTGRES_DB: shiyi_container_ci
-      POSTGRES_USER: shiyi_container
-      POSTGRES_PASSWORD: shiyi-ci-only
-      SHIYI_PG_PORT: 55432
+      POSTGRES_DB: shiori_container_ci
+      POSTGRES_USER: shiori_container
+      POSTGRES_PASSWORD: shiori-ci-only
+      SHIORI_PG_PORT: 55432
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
         with:
@@ -261,27 +261,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          project="shiyi-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          echo "SHIYI_CONTAINER_PROJECT=${project}" >> "${GITHUB_ENV}"
+          project="shiori-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SHIORI_CONTAINER_PROJECT=${project}" >> "${GITHUB_ENV}"
           docker compose --file deploy/docker-compose.yml \
             --project-name "${project}" build --pull session-memory-pg
-          image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}')"
+          image_id="$(docker image inspect shiori-pgvector:local --format '{{.Id}}')"
           if [[ ! "${image_id}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "compose build did not produce an immutable image id" >&2
             exit 1
           fi
-          echo "SHIYI_BUILT_IMAGE_ID=${image_id}" >> "${GITHUB_ENV}"
+          echo "SHIORI_BUILT_IMAGE_ID=${image_id}" >> "${GITHUB_ENV}"
 
       - name: Run actual compose runtime smoke
         shell: bash
-        run: tools/container_runtime_smoke.sh --project "${SHIYI_CONTAINER_PROJECT}" --skip-build
+        run: tools/container_runtime_smoke.sh --project "${SHIORI_CONTAINER_PROJECT}" --skip-build
 
       - name: Assert scan input is the built compose image
         shell: bash
         run: |
           set -euo pipefail
-          image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}')"
-          [[ "${image_id}" == "${SHIYI_BUILT_IMAGE_ID}" ]] || {
+          image_id="$(docker image inspect shiori-pgvector:local --format '{{.Id}}')"
+          [[ "${image_id}" == "${SHIORI_BUILT_IMAGE_ID}" ]] || {
             echo "scan input image changed after runtime smoke" >&2
             exit 1
           }
@@ -289,7 +289,7 @@ jobs:
       - name: Scan built compose image for high or critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: shiyi-pgvector:local
+          image-ref: shiori-pgvector:local
           format: table
           vuln-type: os,library
           severity: HIGH,CRITICAL
@@ -302,12 +302,12 @@ jobs:
         run: |
           set -euo pipefail
           image_id=""
-          if image_id="$(docker image inspect shiyi-pgvector:local --format '{{.Id}}' 2>/dev/null)"; then
-            if [[ -n "${SHIYI_BUILT_IMAGE_ID:-}" && "${image_id}" != "${SHIYI_BUILT_IMAGE_ID}" ]]; then
+          if image_id="$(docker image inspect shiori-pgvector:local --format '{{.Id}}' 2>/dev/null)"; then
+            if [[ -n "${SHIORI_BUILT_IMAGE_ID:-}" && "${image_id}" != "${SHIORI_BUILT_IMAGE_ID}" ]]; then
               echo "scanned image identity changed" >&2
               exit 1
             fi
           fi
-          project="shiyi-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          project="shiori-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           docker compose --file deploy/docker-compose.yml \
             --project-name "${project}" down --volumes --remove-orphans

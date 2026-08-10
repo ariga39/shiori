@@ -1,6 +1,6 @@
 -- session-memory-pg schema
 --
--- Canonical DDL for a fresh `shiyi` database. The historical live database had
+-- Canonical DDL for a fresh `shiori` database. The historical live database had
 -- a legacy embedding_model default; fresh installs intentionally require every
 -- write to declare its provider/model instead of silently selecting one. An
 -- existing database needs an explicit migration before applying this change.
