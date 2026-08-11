@@ -1144,10 +1144,15 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
     _t5 = time.perf_counter()
     if config.dedup:
         # Enabled: run the MMR loop (parses embeddings, calls _cosine_sim) and
-        # record keep/drop decisions with stable reason codes.
+        # record keep/drop decisions with stable reason codes.  Each selected
+        # embedding keeps its content/session/source provenance, so a candidate
+        # is only dropped when it is a true duplicate of a selected chunk: same
+        # embedding similarity above the threshold AND identical content,
+        # session_id, and source_type.  A related-but-distinct chunk (different
+        # content or different provenance) is preserved as separate evidence.
         selected = []
         selected_ids: list[str] = []
-        selected_embeddings = []
+        selected_embeddings: list[tuple] = []
         dedup_events: list[dict] = []
         for rid in ranked:
             if len(selected) >= result_limit:
@@ -1160,8 +1165,13 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
             if emb_str and selected_embeddings:
                 try:
                     emb = [float(x) for x in emb_str.strip("[]").split(",")]
-                    for sel_emb in selected_embeddings:
-                        if _cosine_sim(emb, sel_emb) > MMR_SIM_THRESHOLD:
+                    for sel_emb, sel_content, sel_sid, sel_stype in selected_embeddings:
+                        if (
+                            _cosine_sim(emb, sel_emb) > MMR_SIM_THRESHOLD
+                            and content == sel_content
+                            and sid == sel_sid
+                            and stype == sel_stype
+                        ):
                             too_similar = True
                             break
                     if too_similar:
@@ -1174,13 +1184,13 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
                             "reason": "mmr_dedup",
                         })
                         continue
-                    selected_embeddings.append(emb)
+                    selected_embeddings.append((emb, content, sid, stype))
                 except (ValueError, AttributeError):
                     pass
             elif emb_str:
                 try:
                     emb = [float(x) for x in emb_str.strip("[]").split(",")]
-                    selected_embeddings.append(emb)
+                    selected_embeddings.append((emb, content, sid, stype))
                 except (ValueError, AttributeError):
                     pass
 
