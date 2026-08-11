@@ -120,3 +120,21 @@ def test_dedup_keeps_identical_content_across_source_types(replay_query, db):
         (A, session_id, "synthetic-note"),
         (A, session_id, "synthetic-chat"),
     }
+
+
+def test_search_page_preserves_distinct_evidence_across_pages(replay_query, db):
+    conn, prefix = db
+    session_id = prefix + "-paged"
+    now = datetime.now(UTC)
+    # Same real-PG A/B pair; verify the public pagination seam does not swallow
+    # distinct evidence before paging and limit/offset semantics do not regress.
+    _insert(conn, session_id, B, replay_query.embed(B, input_type="document"), now)
+    _insert(conn, session_id, A, replay_query.embed(A, input_type="document"), now)
+
+    page1 = query.search_page(QUERY, limit=1, offset=0)
+    page2 = query.search_page(QUERY, limit=1, offset=1)
+
+    assert [row[0] for row in page1.results] == [B]
+    assert page1.has_more is True
+    assert [row[0] for row in page2.results] == [A]
+    assert page2.has_more is False
