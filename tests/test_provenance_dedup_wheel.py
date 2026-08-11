@@ -9,6 +9,7 @@ through the real PostgreSQL seam.  No source-tree module is loaded by the child;
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -107,16 +108,9 @@ def installed_wheel(uv: str, tmp_path_factory) -> Path:
     return venv
 
 
-def test_installed_wheel_cli_preserves_distinct_evidence(
-    installed_wheel: Path, db, tmp_path: Path
-):
-    venv = installed_wheel
-    bridge_env = dict(os.environ)
-    bridge_env["PYTHONPATH"] = _parent_site_packages()
-
-    # Seed the isolated test DB with the real A/B vectors.
-    conn, prefix = db
-    session_id = prefix + "-wheel"
+def _seed_distinct_evidence(db, session_id: str) -> None:
+    """Seed the isolated test DB with the real A/B vectors under one session."""
+    conn, _ = db
     now = datetime.now(UTC)
     from shiori.embedding_replay import ReplayEmbedder
 
@@ -124,7 +118,9 @@ def test_installed_wheel_cli_preserves_distinct_evidence(
     _insert(conn, session_id, B, embedder.embed(B, input_type="document"), now)
     _insert(conn, session_id, A, embedder.embed(A, input_type="document"), now)
 
-    # Copy the static replay fixture into tmp and write config pointing at it.
+
+def _write_config(tmp_path: Path) -> Path:
+    """Copy the static replay fixture into tmp and write config pointing at it."""
     fixture_dir = tmp_path / "fixture"
     fixture_dir.mkdir()
     for name in ("manifest.json", "corpus.jsonl", "queries.jsonl", "vectors.json"):
@@ -139,6 +135,20 @@ def test_installed_wheel_cli_preserves_distinct_evidence(
         f'database_dsn = "{_dsn()}"\n',
         encoding="utf-8",
     )
+    return config
+
+
+def test_installed_wheel_cli_preserves_distinct_evidence(
+    installed_wheel: Path, db, tmp_path: Path
+):
+    venv = installed_wheel
+    bridge_env = dict(os.environ)
+    bridge_env["PYTHONPATH"] = _parent_site_packages()
+
+    conn, prefix = db
+    session_id = prefix + "-wheel"
+    _seed_distinct_evidence(db, session_id)
+    config = _write_config(tmp_path)
 
     cli = venv / "bin" / "shiori"
     result = _run(
@@ -151,3 +161,75 @@ def test_installed_wheel_cli_preserves_distinct_evidence(
     assert b_pos != -1, f"B (current fact) missing from CLI output:\n{result.stdout}"
     assert a_pos != -1, f"A (historical fact) missing from CLI output:\n{result.stdout}"
     assert b_pos < a_pos, f"expected current-fact B before historical-fact A, got:\n{result.stdout}"
+
+
+def test_installed_wheel_mcp_preserves_distinct_evidence(
+    installed_wheel: Path, db, tmp_path: Path
+):
+    venv = installed_wheel
+    bridge_env = dict(os.environ)
+    bridge_env["PYTHONPATH"] = _parent_site_packages()
+
+    # The child mcp_server must resolve from the wheel's site-packages, not the
+    # source tree, when run from an unrelated cwd.
+    out = _run(
+        str(venv / "bin" / "python"),
+        "-c",
+        "import mcp_server; print(mcp_server.__file__)",
+        cwd=tmp_path,
+        env=bridge_env,
+    )
+    mcp_path = out.stdout.strip()
+    assert str(venv / "lib") in mcp_path, f"mcp_server loaded from source: {mcp_path}"
+
+    conn, prefix = db
+    session_id = prefix + "-wheel-mcp"
+    _seed_distinct_evidence(db, session_id)
+    config = _write_config(tmp_path)
+    cli = venv / "bin" / "shiori"
+
+    probe = _MCP_PROBE.replace("__QUERY__", QUERY).replace("__SID__", session_id)
+    result = _run(
+        str(venv / "bin" / "python"), "-c", probe, str(cli), str(config),
+        cwd=tmp_path, env=bridge_env,
+    )
+    assert result.returncode == 0, f"MCP probe failed:\n{result.stderr}\n{result.stdout}"
+    assert "MCP_DISTINCT_OK" in result.stdout
+
+
+_MCP_PROBE = r'''
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+cli, config = sys.argv[1], sys.argv[2]
+env = dict(os.environ)
+env["PYTHONUNBUFFERED"] = "1"
+server = StdioServerParameters(command=cli, args=["--config", config, "serve"], env=env, cwd=str(Path(config).parent))
+
+QUERY = "__QUERY__"
+SID = "__SID__"
+EXPECTED = [(QUERY_CONTENT_B, SID, "synthetic-note"), (QUERY_CONTENT_A, SID, "synthetic-note")]
+
+
+async def main():
+    args = {"query": QUERY, "limit": 20, "offset": 0, "session_ids": [SID]}
+    async with stdio_client(server) as (r, w):
+        async with ClientSession(r, w) as s:
+            await s.initialize()
+            res = await s.call_tool("search", args)
+            if res.isError or not res.content:
+                return
+            payload = json.loads(res.content[0].text)
+    rows = [(row["content"], row["session_id"], row["source_type"]) for row in payload.get("results", [])]
+    if rows == EXPECTED:
+        print("MCP_DISTINCT_OK")
+
+
+asyncio.run(main())
+'''.replace("QUERY_CONTENT_B", json.dumps(B)).replace("QUERY_CONTENT_A", json.dumps(A))
