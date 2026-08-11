@@ -255,7 +255,7 @@ def test_phase4e2_report_derives_from_results():
 # ── Phase 4E2 manifest-driven report metadata (genuine red, task #29) ────────
 
 
-P4E2_REPORT_TITLE = "Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)"
+P4E2_REPORT_TITLE = "# Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)"
 P4E2_REPORT_NOTES = [
     # Frozen literals for the report_notes contract.
     "q-0057: grade-3 doc-0011 drops from rank 3 to rank 12 with Recall@5=1/2 while grade-2 doc-0012 reaches rank 1; frozen decay formula risk on a composite latest query.",
@@ -265,10 +265,10 @@ P4E2_REPORT_NOTES = [
 
 
 def test_build_report_cli_honors_phase4e2_title_and_notes(tmp_path):
-    """Genuine red: the public `build_report` CLI must honor manifest-level
-    `report_title`/`report_notes` (Phase 4E2 title + the three frozen notes) and
-    drop the two stale Known-gaps claims.  The current builder hardcodes the
-    Phase 4D baseline title and ignores the optional fields, so this must fail."""
+    """Behavior spec: the public `build_report` CLI must honor manifest-level
+    `report_title`/`report_notes` — a Phase 4E2 H1 title and the three frozen
+    notes replace the default Phase 4D baseline title and Known-gaps list, and
+    the two stale claims must not appear."""
 
     if not P4E2_MANIFEST.exists() or not P4E2_RESULTS.exists():
         pytest.skip("phase4e2 deliverables not committed")
@@ -293,8 +293,8 @@ def test_build_report_cli_honors_phase4e2_title_and_notes(tmp_path):
     assert proc.returncode == 0, proc.stderr
     text = out_report.read_text(encoding="utf-8")
 
-    # Phase 4E2 title is honored.
-    assert P4E2_REPORT_TITLE in text
+    # Phase 4E2 title is honored (as the H1 first line).
+    assert text.startswith(P4E2_REPORT_TITLE + "\n")
     # Every frozen note appears verbatim.
     for note in P4E2_REPORT_NOTES:
         assert note in text

@@ -1,4 +1,4 @@
-Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)
+# Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)
 
 _Measurement-only. No acceptance thresholds. Holdout (48) untouched. Public datasets not run._
 
