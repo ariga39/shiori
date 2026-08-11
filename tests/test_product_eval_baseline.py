@@ -18,7 +18,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 PRODUCT_EVAL = REPO / "benchmark" / "product_eval"
@@ -193,3 +197,107 @@ def test_task11_baseline_byte_stable():
         "benchmark/run_benchmark.py": "46a1adac0db1ec7a715834724373b8f82220356409dba249a0c354bf95a8d117",
     }.items():
         assert _sha256_bytes((REPO / rel).read_bytes()) == expected, f"{rel} drifted"
+
+
+# ── Phase 4E2 independent 72-dev measurement closure (task #29) ──────────────
+
+
+P4E2_RESULTS = PRODUCT_EVAL / "phase4e2_72_results.json"
+P4E2_MANIFEST = PRODUCT_EVAL / "phase4e2_72_manifest.json"
+P4E2_REPORT = PRODUCT_EVAL / "phase4e2_72_report.md"
+P4E2_RESULTS_SHA = "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e"
+
+
+def test_phase4e2_results_sha_and_ids():
+    if not P4E2_RESULTS.exists():
+        pytest.skip("phase4e2 results not committed")
+    assert _sha256_bytes(P4E2_RESULTS.read_bytes()) == P4E2_RESULTS_SHA
+    results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    splits = {s["query_id"]: s["split"] for s in json.loads(DATASET_MANIFEST.read_text(encoding="utf-8"))["query_splits"]}
+    dev = {q for q, s in splits.items() if s == "tune"}
+    holdout = {q for q, s in splits.items() if s == "holdout"}
+    assert len(results["smoke_query_ids"]) == 72
+    assert set(results["smoke_query_ids"]) == dev
+    assert set(results["smoke_query_ids"]).isdisjoint(holdout)
+    for config_name, traces in results["traces"].items():
+        assert set(traces.keys()) == dev, f"{config_name} traces not exactly 72 dev"
+
+
+def test_phase4e2_manifest_closure():
+    if not P4E2_MANIFEST.exists() or not P4E2_RESULTS.exists() or not P4E2_REPORT.exists():
+        pytest.skip("phase4e2 deliverables not committed")
+    m = json.loads(P4E2_MANIFEST.read_text(encoding="utf-8"))
+    assert m["result_file_sha256"] == _sha256_bytes(P4E2_RESULTS.read_bytes())
+    assert m["report_file_sha256"] == _sha256_bytes(P4E2_REPORT.read_bytes())
+    assert m["dev_set"]["query_count"] == 72
+    # Pinned 72-dev vectors match the frozen Phase 4D pin.
+    assert m["local_run_inputs"]["dev_query_vectors.json"]["sha256"] == "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2"
+    # Report byte-equals the manifest-driven generator output (full offline
+    # byte-equality closure).  The committed report must regenerate exactly.
+    from benchmark.product_eval.build_report import _generate
+
+    results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    generated = _generate(results, m)
+    assert generated == P4E2_REPORT.read_text(encoding="utf-8")
+
+
+def test_phase4e2_report_derives_from_results():
+    if not P4E2_REPORT.exists() or not P4E2_RESULTS.exists():
+        pytest.skip("phase4e2 deliverables not committed")
+    results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    report = P4E2_REPORT.read_text(encoding="utf-8")
+    for cfg in results["configs"]:
+        assert cfg in report
+    assert "72 development queries" in report
+    assert "Holdout (48) untouched" in report
+
+
+# ── Phase 4E2 manifest-driven report metadata (genuine red, task #29) ────────
+
+
+P4E2_REPORT_TITLE = "# Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)"
+P4E2_REPORT_NOTES = [
+    # Frozen literals for the report_notes contract.
+    "q-0057: grade-3 doc-0011 drops from rank 3 to rank 12 with Recall@5=1/2 while grade-2 doc-0012 reaches rank 1; frozen decay formula risk on a composite latest query.",
+    "q-0086: grade-2 doc-0021 moves from rank 3 to rank 4 and duplicate nDCG@10 drops 1.0 -> 0.997316; a deterministic minor regression, not tie/noise.",
+    "source/session/time 9/9/3 is an unfiltered counterfactual trace metric, not a Phase 4E1 active-filter regression; active filters remain 0/0/0.",
+]
+
+
+def test_build_report_cli_honors_phase4e2_title_and_notes(tmp_path):
+    """Behavior spec: the public `build_report` CLI must honor manifest-level
+    `report_title`/`report_notes` — a Phase 4E2 H1 title and the three frozen
+    notes replace the default Phase 4D baseline title and Known-gaps list, and
+    the two stale claims must not appear."""
+
+    if not P4E2_MANIFEST.exists() or not P4E2_RESULTS.exists():
+        pytest.skip("phase4e2 deliverables not committed")
+    manifest = json.loads(P4E2_MANIFEST.read_text(encoding="utf-8"))
+    manifest["report_title"] = P4E2_REPORT_TITLE
+    manifest["report_notes"] = P4E2_REPORT_NOTES
+    tmp_manifest = tmp_path / "manifest.json"
+    tmp_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    out_report = tmp_path / "report.md"
+
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "benchmark.product_eval.build_report",
+            "--results", str(P4E2_RESULTS),
+            "--manifest", str(tmp_manifest),
+            "--out", str(out_report),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+    )
+    assert proc.returncode == 0, proc.stderr
+    text = out_report.read_text(encoding="utf-8")
+
+    # Phase 4E2 title is honored (as the H1 first line).
+    assert text.startswith(P4E2_REPORT_TITLE + "\n")
+    # Every frozen note appears verbatim.
+    for note in P4E2_REPORT_NOTES:
+        assert note in text
+    # The two stale/incorrect Known-gaps claims are gone.
+    assert "does not apply source/session/time filters" not in text
+    assert "+temporal degrades the temporal and filter buckets" not in text

@@ -24,7 +24,11 @@ def _fmt(v, nd=3):
 
 def _generate(results: dict, manifest: dict) -> str:
     lines: list[str] = []
-    lines.append("# Shiori Phase 4D Baseline Report (72 development queries)")
+    title = manifest.get(
+        "report_title",
+        "# Shiori Phase 4D Baseline Report (72 development queries)",
+    )
+    lines.append(title)
     lines.append("")
     lines.append("_Measurement-only. No acceptance thresholds. Holdout (48) untouched. Public datasets not run._")
     lines.append("")
@@ -118,9 +122,15 @@ def _generate(results: dict, manifest: dict) -> str:
 
     lines.append("## Known gaps")
     lines.append("")
-    lines.append("- Production query.search() does not apply source/session/time filters; all dense-based configs show filter leakage (source=9, session=9, time=3 per config).")
-    lines.append("- +temporal degrades the temporal and filter buckets (decay lifts non-target docs); +dedup drops relevant docs (coverage risk).")
-    lines.append("- no_evidence returns false positives in the dense path (no abstention mechanism); lexical-only abstains by absence of candidates.")
+    notes = manifest.get("report_notes")
+    if notes:
+        # Manifest-provided notes fully replace the default list.
+        for note in notes:
+            lines.append(f"- {note}")
+    else:
+        lines.append("- Production query.search() does not apply source/session/time filters; all dense-based configs show filter leakage (source=9, session=9, time=3 per config).")
+        lines.append("- +temporal degrades the temporal and filter buckets (decay lifts non-target docs); +dedup drops relevant docs (coverage risk).")
+        lines.append("- no_evidence returns false positives in the dense path (no abstention mechanism); lexical-only abstains by absence of candidates.")
     lines.append("")
     return "\n".join(lines) + "\n"
 
