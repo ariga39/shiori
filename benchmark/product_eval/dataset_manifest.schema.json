@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Phase 4D product_eval dataset manifest",
+  "description": "Sidecar manifest for task #18 Phase 4D. Query/judgment rows reuse the task #11 corpus_schema.json; split/tag/license/revision/hash live ONLY in this independent manifest. Raw/derived rows of licensed public datasets are never committed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "dataset",
+    "golden_queries",
+    "adapters",
+    "cross_coverage_targets",
+    "query_splits"
+  ],
+  "properties": {
+    "manifest_version": {"type": "string", "enum": ["1"]},
+    "query_splits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query_id", "split", "bucket", "tags", "evidence"],
+        "properties": {
+          "query_id": {"type": "string", "pattern": "^q-[0-9]{4}$"},
+          "split": {"type": "string", "enum": ["tune", "holdout"]},
+          "bucket": {"type": "string", "enum": ["exact", "paraphrase", "multilingual", "temporal", "multi_turn", "duplicate", "no_evidence", "filter"]},
+          "tags": {"type": "array", "items": {"type": "string"}},
+          "evidence": {
+            "type": "object",
+            "description": "Auditable machine-checkable basis for each cross-coverage tag: stable doc/session ids or reason codes, consistent with corpus metadata.",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "rows_jsonl", "schema_ref", "query_count", "tune_count", "holdout_count"],
+      "properties": {
+        "name": {"type": "string"},
+        "rows_jsonl": {"type": "string"},
+        "schema_ref": {"type": "string"},
+        "query_count": {"type": "integer"},
+        "tune_count": {"type": "integer"},
+        "holdout_count": {"type": "integer"}
+      }
+    },
+    "golden_queries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bucket_counts", "split_counts"],
+      "properties": {
+        "bucket_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["exact", "paraphrase", "multilingual", "temporal", "multi_turn", "duplicate", "no_evidence", "filter"],
+          "properties": {
+            "exact": {"type": "integer"},
+            "paraphrase": {"type": "integer"},
+            "multilingual": {"type": "integer"},
+            "temporal": {"type": "integer"},
+            "multi_turn": {"type": "integer"},
+            "duplicate": {"type": "integer"},
+            "no_evidence": {"type": "integer"},
+            "filter": {"type": "integer"}
+          }
+        },
+        "split_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tune", "holdout"],
+          "properties": {
+            "tune": {"type": "integer"},
+            "holdout": {"type": "integer"}
+          }
+        }
+      }
+    },
+    "cross_coverage_targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "same_name", "long_chinese", "cross_session", "knowledge_update",
+        "hard_negative", "source_filter", "session_filter", "time_filter"
+      ],
+      "properties": {
+        "same_name": {"type": "integer", "minimum": 0},
+        "long_chinese": {"type": "integer", "minimum": 0},
+        "cross_session": {"type": "integer", "minimum": 0},
+        "knowledge_update": {"type": "integer", "minimum": 0},
+        "hard_negative": {"type": "integer", "minimum": 0},
+        "source_filter": {"type": "integer", "minimum": 0},
+        "session_filter": {"type": "integer", "minimum": 0},
+        "time_filter": {"type": "integer", "minimum": 0}
+      }
+    },
+    "adapters": {
+      "type": "object",
+      "description": "Licensed/public dataset adapters. Local-only user-supplied data; raw/derived rows are never committed. redistribution=unresolved or not_run when the upstream chain is not closed.",
+      "additionalProperties": false,
+      "required": ["longmemeval", "nfcorpus", "miracl"],
+      "properties": {
+        "longmemeval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "hf_repo", "revision", "card_license", "upstream_provenance", "redistribution"],
+          "properties": {
+            "status": {"type": "string", "enum": ["local_only", "not_run"]},
+            "hf_repo": {"type": "string"},
+            "revision": {"type": "string"},
+            "card_license": {"type": "string"},
+            "upstream_provenance": {"type": "string"},
+            "redistribution": {"type": "string", "enum": ["unresolved", "not_run"]},
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["path", "bytes", "sha256"],
+                "properties": {
+                  "path": {"type": "string"},
+                  "bytes": {"type": "integer"},
+                  "sha256": {"type": "string", "minLength": 64, "maxLength": 64}
+                }
+              }
+            }
+          }
+        },
+        "nfcorpus": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "source", "source_md5", "card_license", "upstream_provenance", "redistribution"],
+          "properties": {
+            "status": {"type": "string", "enum": ["local_only", "not_run"]},
+            "source": {"type": "string"},
+            "source_md5": {"type": "string"},
+            "card_license": {"type": "string"},
+            "upstream_provenance": {"type": "string"},
+            "redistribution": {"type": "string", "enum": ["unresolved", "not_run"]}
+          }
+        },
+        "miracl": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "hf_repo", "revision", "card_license", "scope", "redistribution"],
+          "properties": {
+            "status": {"type": "string", "enum": ["adapter_only", "not_run", "local_only"]},
+            "hf_repo": {"type": "string"},
+            "revision": {"type": "string"},
+            "card_license": {"type": "string"},
+            "scope": {"type": "string"},
+            "redistribution": {"type": "string", "enum": ["not_run", "unresolved"]},
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["lang", "split", "path", "bytes"],
+                "properties": {
+                  "lang": {"type": "string", "enum": ["zh", "ja", "en"]},
+                  "split": {"type": "string"},
+                  "path": {"type": "string"},
+                  "bytes": {"type": "integer"}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
