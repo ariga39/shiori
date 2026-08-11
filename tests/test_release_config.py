@@ -92,9 +92,36 @@ def test_ci_actions_and_container_are_pinned() -> None:
 def test_manifest_contains_runtime_release_references() -> None:
     manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
 
-    assert "include schema.sql" in manifest
+    assert "recursive-include shiori *.sql" in manifest
     assert "include tools/legacy_schema_upgrade_smoke.sh" in manifest
     assert "include tools/verify_pgvector_image.sh" in manifest
     assert "include tools/container_runtime_smoke.sh" in manifest
+    assert "include tools/e2e_replay_smoke.sh" in manifest
+    assert "include tools/db_count.py" in manifest
+    assert "recursive-include tools/e2e-replay-sessions *.jsonl" in manifest
+    assert "recursive-include tests/fixtures/replay *.jsonl *.json" in manifest
     assert "recursive-include docs *.md" in manifest
     assert "include THIRD_PARTY_NOTICES.md" in manifest
+
+
+def test_schema_sql_ships_as_package_data() -> None:
+    """schema.sql must ship inside the wheel so a fresh-DB migrate on an
+    installed package resolves it (regression for the pre-existing wheel gap)."""
+    import tomllib
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    package_data = pyproject["tool"]["setuptools"]["package-data"]
+    assert "schema.sql" in package_data.get("shiori", [])
+    manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    assert "recursive-include shiori *.sql" in manifest
+    assert (ROOT / "shiori" / "schema.sql").is_file()
+
+
+def test_schema_sql_resolvable_from_package() -> None:
+    import shiori.schema_migrations as schema_migrations
+
+    schema_path = schema_migrations._schema_sql_path()
+    assert schema_path.is_file(), f"schema.sql not resolvable from package: {schema_path}"
+    assert schema_path.name == "schema.sql"
+    text = schema_path.read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS session_chunks" in text

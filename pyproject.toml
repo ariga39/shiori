@@ -35,6 +35,9 @@ include = ["shiori*"]
 [tool.setuptools]
 py-modules = ["ingest", "ingest_discord", "ingest_hermes", "query", "mcp_server"]
 
+[tool.setuptools.package-data]
+shiori = ["schema.sql"]
+
 [tool.pytest.ini_options]
 addopts = "-ra"
 pythonpath = ["."]

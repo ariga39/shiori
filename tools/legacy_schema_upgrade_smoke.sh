@@ -8,7 +8,7 @@ usage() {
 
 cli=""
 admin_dsn=""
-schema_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/schema.sql"
+schema_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/shiori/schema.sql"
 while (($#)); do
   case "$1" in
     --cli)
