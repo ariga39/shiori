@@ -162,17 +162,32 @@ count="$(psql_exec --tuples-only --no-align --command 'SELECT count(*) FROM shio
 }
 
 "${compose[@]}" restart session-memory-pg >/dev/null
+# Restart readiness must not trust `pg_isready` alone: pg_isready can report
+# success while the old postmaster is still shutting down, and the very next
+# psql then fails with `database system is shutting down`. Wait for the NEW
+# postmaster generation to be stably readable AND writable: a transactional
+# probe must succeed twice consecutively (fail-closed with a hard timeout).
 ready=false
 for _ in {1..60}; do
-  if "${compose[@]}" exec --no-TTY session-memory-pg \
-    pg_isready --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" >/dev/null 2>&1; then
-    ready=true
-    break
+  if "${compose[@]}" exec --no-TTY --env PGPASSWORD="${POSTGRES_PASSWORD}" \
+      session-memory-pg psql --no-psqlrc --set ON_ERROR_STOP=1 \
+      --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" \
+      --command 'BEGIN; SELECT 1; COMMIT;' >/dev/null 2>&1; then
+    # One success can still be a shutting-down old postmaster's last breath;
+    # require a second consecutive success to confirm the new generation is
+    # durably accepting reads and writes.
+    if "${compose[@]}" exec --no-TTY --env PGPASSWORD="${POSTGRES_PASSWORD}" \
+        session-memory-pg psql --no-psqlrc --set ON_ERROR_STOP=1 \
+        --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" \
+        --command 'BEGIN; SELECT 1; COMMIT;' >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
   fi
   sleep 1
 done
 [[ "${ready}" == true ]] || {
-  echo "database container did not become ready after restart" >&2
+  echo "database container did not become read/write ready after restart" >&2
   exit 1
 }
 
