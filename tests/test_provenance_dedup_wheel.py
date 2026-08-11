@@ -93,20 +93,31 @@ def _insert(conn, session_id, content, embedding, ts, source_type="synthetic-not
 
 @pytest.fixture(scope="module")
 def installed_wheel(uv: str, tmp_path_factory) -> Path:
-    """Build + install the current tree as a wheel, offline, into a clean venv."""
+    """Build + install the current tree as a wheel, offline, into a clean venv.
+
+    The wheel is built with the locked project build env (the current
+    interpreter populated by ``uv sync --locked --extra dev``) using
+    ``--no-build-isolation`` under a hard offline gate; the clean venv only
+    installs the resulting wheel.  No dedicated build venv is created."""
+    import importlib.metadata
+
+    # The build backend must be the exact locked version from the shared dev
+    # environment (matching uv.lock's single setuptools entry), not ambient.
+    with (ROOT / "uv.lock").open("rb") as fh:
+        lock = tomllib.load(fh)
+    locked = [p for p in lock["package"] if p.get("name") == "setuptools"]
+    assert len(locked) == 1
+    locked_version = locked[0]["version"]
+    env_version = importlib.metadata.version("setuptools")
+    assert env_version == locked_version == "79.0.1", (
+        f"build backend mismatch: env={env_version} lock={locked_version}"
+    )
+
     tmp_path = tmp_path_factory.mktemp("wheel")
     dist = tmp_path / "dist"
     dist.mkdir()
-    # Build in a dedicated venv with the pyproject-pinned backend installed
-    # offline from the local cache, so the build runs with
-    # --no-build-isolation under a hard offline gate (no index/network).
-    build_venv = tmp_path / "build-venv"
-    _run(uv, "venv", "--python", str(sys.executable), str(build_venv))
-    install_env = {"UV_OFFLINE": "1", "PIP_NO_INDEX": "1"}
-    _run(uv, "pip", "install", "--offline", "--python", str(build_venv / "bin" / "python"),
-         "setuptools>=75,<80", env=install_env)
     _run(uv, "build", "--offline", "--no-build-isolation",
-         "--python", str(build_venv / "bin" / "python"),
+         "--python", str(sys.executable),
          "--out-dir", str(dist), str(ROOT), cwd=ROOT)
     wheels = list(dist.glob("*.whl"))
     assert wheels, "uv build produced no wheel"
