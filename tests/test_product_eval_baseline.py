@@ -204,6 +204,13 @@ P4E2_RESULTS = PRODUCT_EVAL / "phase4e2_72_results.json"
 P4E2_MANIFEST = PRODUCT_EVAL / "phase4e2_72_manifest.json"
 P4E2_REPORT = PRODUCT_EVAL / "phase4e2_72_report.md"
 P4E2_RESULTS_SHA = "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e"
+P4E2_CAVEATS_BLOCK = """---
+
+## Phase 4E2 intent-gated decay caveats (author-confirmed, measurement-only)
+
+- **q-0057 (`latest` temporal intent)**: the frozen 30-day decay boosts grade-2 `doc-0012` to rank 1 but pushes grade-3 `doc-0011` from rank 3 to rank 12, so this query's Recall@5 is 1/2.  This confirms the intent gate fires correctly; it also documents that the frozen unconditional 30-day formula can still out-rank semantic relevance on a composite `latest` query.  No formula adjustment is made (out of scope).
+- **q-0086 (no intent, ordinary query)**: once decay is disabled for ordinary queries, grade-2 `doc-0021` moves from rank 3 to rank 4 and non-relevant `doc-0019` to rank 3, deterministically lowering the duplicate bucket nDCG@10 from 1.0 to 0.997316.  This is a real, deterministic minor regression (not tie/noise), honestly recorded.
+- **Filter leakage `9/9/3` is an unfiltered counterfactual**: the postprocess `source/session/time` counts are computed by overlaying the authored ledger on UNFILTERED runner traces.  They are NOT a Phase 4E1 active-filter leakage regression, which remains `0/0/0` (plus this task's public filter tests)."""
 
 
 def test_phase4e2_results_sha_and_ids():
@@ -230,12 +237,16 @@ def test_phase4e2_manifest_closure():
     assert m["dev_set"]["query_count"] == 72
     # Pinned 72-dev vectors match the frozen Phase 4D pin.
     assert m["local_run_inputs"]["dev_query_vectors.json"]["sha256"] == "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2"
-    # Report byte-equals the unchanged generator output (offline closure).
+    # Report byte-equals the unchanged generator output (offline closure),
+    # followed by the committed Phase 4E2 author-confirmed caveats block.
     from benchmark.product_eval.build_report import _generate
 
     results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
     generated = _generate(results, m)
-    assert generated == P4E2_REPORT.read_text(encoding="utf-8")
+    report_text = P4E2_REPORT.read_text(encoding="utf-8")
+    assert report_text.startswith(generated), "generated report body drifted"
+    assert P4E2_CAVEATS_BLOCK in report_text, "Phase 4E2 caveats block missing"
+    assert report_text.strip().endswith(P4E2_CAVEATS_BLOCK), "caveats block must be the report tail"
 
 
 def test_phase4e2_report_derives_from_results():
