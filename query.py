@@ -7,6 +7,7 @@ Usage: python3 query.py "search query" [--limit N] [--offset N]
 """
 
 import argparse
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
@@ -55,6 +56,137 @@ class QueryError(ConfigError):
     """Secret-safe, stable error raised by the bounded query service."""
 
     code = "query_failed"
+
+
+# Phase 4D evaluation seam (behavior-preserving, context-local). A scoped
+# evaluation context may install a stage configuration (ablations) and a
+# collector. The SAME production search implementation executes under the
+# config; the default (all stages enabled) must be item-for-item equivalent to
+# no-context search. The context is a ContextVar so concurrent queries never
+# share a trace, and it is always restored by the context manager even on
+# exception. Collector errors are contained and never change search outcome.
+class StageConfig:
+    """Which production stages participate in a search (frozen ablation matrix).
+
+    The frozen matrix semantics are:
+    - dense: the pgvector cosine channel.
+    - lexical: the ts_rank_cd channel PLUS its trigram fallback (one switch;
+      ts_rank_cd and trigram are two observable stages of the SAME lexical
+      channel, so a single switch drives both).
+    - exact: the ILIKE substring channel.
+    - temporal: the temporal-decay step.
+    - dedup: the MMR dedup step.
+    RRF is the multi-channel fusion mechanism (not a switch): it always fuses
+    whatever candidate channels are enabled.
+
+    Disabled stages are SKIPPED at their execution entry point (their SQL/step
+    does not run), so an ablation's latency reflects the truly-executed stages.
+    A configuration with no enabled candidate channel (dense/lexical/exact all
+    off) is invalid and fails closed.
+    """
+
+    __slots__ = ("dense", "lexical", "exact", "temporal", "dedup")
+
+    def __init__(self, *, dense=True, lexical=True, exact=True, temporal=True, dedup=True) -> None:
+        values = {"dense": dense, "lexical": lexical, "exact": exact, "temporal": temporal, "dedup": dedup}
+        for name, value in values.items():
+            if not isinstance(value, bool):
+                raise TypeError(f"StageConfig.{name} must be a bool, got {type(value).__name__}")
+        self.dense = dense
+        self.lexical = lexical
+        self.exact = exact
+        self.temporal = temporal
+        self.dedup = dedup
+
+    def has_candidate_channel(self) -> bool:
+        return self.dense or self.lexical or self.exact
+
+    def validate(self) -> None:
+        # Re-assert strict bool typing (constructor already enforces it; this
+        # guards against a mutated config object).
+        for name in ("dense", "lexical", "exact", "temporal", "dedup"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"StageConfig.{name} must be a bool, got {type(getattr(self, name)).__name__}")
+        if not self.has_candidate_channel():
+            raise ValueError(
+                "StageConfig with no candidate channel (dense/lexical/exact all disabled) is invalid"
+            )
+
+    def stage_enabled(self, stage: str) -> bool:
+        if stage in {"ts_rank_cd", "trigram"}:
+            return self.lexical
+        return bool(getattr(self, stage, True))
+
+
+class EvalContext:
+    """Scoped evaluation context: stage config + optional trace collector.
+
+    `collector` is called as ``collector(stage, events)`` after each production
+    stage. Any exception raised by the collector is recorded in
+    ``context.errors`` and swallowed so production search outcome is unchanged.
+    """
+
+    __slots__ = ("config", "collector", "errors")
+
+    def __init__(self, config: StageConfig, collector=None) -> None:
+        self.config = config
+        self.collector = collector
+        self.errors: list[Exception] = []
+
+
+_EVAL_CONTEXT_VAR: Any = None  # contextvars.ContextVar installed lazily at import time
+
+
+def _init_eval_context_var():
+    """Create the module-level ContextVar (idempotent)."""
+    global _EVAL_CONTEXT_VAR
+    if _EVAL_CONTEXT_VAR is None:
+        import contextvars
+
+        _EVAL_CONTEXT_VAR = contextvars.ContextVar("shiori_eval_context", default=None)
+
+
+def _eval_context_var():
+    """Return the module ContextVar (typed for pyright)."""
+    _init_eval_context_var()
+    return _EVAL_CONTEXT_VAR
+
+
+def _eval_scope(config: StageConfig | None = None, collector=None):
+    """Return a context manager installing a scoped EvalContext (must-restore).
+
+    The context is stored in a ContextVar so the collector/config are local to
+    the executing task/thread and never leak between concurrent queries. The
+    previous value is always restored on exit (including on exception).
+    """
+    import contextlib
+
+    var = _eval_context_var()
+
+    @contextlib.contextmanager
+    def _manager():
+        ctx = EvalContext(config if config is not None else StageConfig(), collector)
+        token = var.set(ctx)
+        try:
+            yield ctx
+        finally:
+            var.reset(token)
+
+    return _manager()
+
+
+def _current_eval() -> EvalContext | None:
+    return _eval_context_var().get()
+
+
+def _emit_eval(stage: str, events: list[dict]) -> None:
+    eval_ctx = _current_eval()
+    if eval_ctx is None or eval_ctx.collector is None:
+        return
+    try:
+        eval_ctx.collector(stage, events)
+    except Exception as exc:  # noqa: BLE001 - observer must never break search
+        eval_ctx.errors.append(exc)
 
 
 @dataclass(frozen=True)
@@ -341,10 +473,19 @@ def _build_tsquery(query_text: str) -> str:
 def search(query, limit=DEFAULT_LIMIT, offset=0):
     query = _validate_query_text(query)
     limit, offset = _normalise_search_args(limit, offset)
-    # Obtain the provider result before opening a database connection.  This
-    # avoids leaking a connection when the provider returns malformed data or
-    # an embedding dimension that does not match the configured schema.
-    query_embedding = _validate_embedding_vector(embed_query(query), expected_dim=EMBED_DIM)
+    eval_ctx = _current_eval()
+    config = eval_ctx.config if eval_ctx is not None else StageConfig()
+    config.validate()
+    # The query embedding is only needed by the dense (vector) channel. Fetch
+    # and validate it ONLY inside the dense-enabled path, so a dense-off
+    # ablation never calls the embedding provider (no model/API/replay lookup)
+    # and its latency/failure surface is a true ablation.
+    query_embedding = None
+    if config.dense:
+        # Obtain the provider result before opening a database connection.  This
+        # avoids leaking a connection when the provider returns malformed data
+        # or an embedding dimension that does not match the configured schema.
+        query_embedding = _validate_embedding_vector(embed_query(query), expected_dim=EMBED_DIM)
     try:
         conn = get_db()
     except QueryError:
@@ -387,29 +528,55 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
         conn.rollback()
 
     # Vector search ---------------------------------------------------------
-    try:
-        cur.execute("""
-            SELECT id, content, 1 - (embedding <=> %s::vector) as vscore,
-                   timestamp_start, session_id, source_type, embedding::text, created_at,
-                   embedding_model, vector_dims(embedding)
-            FROM session_chunks
-            WHERE embedding IS NOT NULL
-              AND embedding_model = %s
-              AND vector_dims(embedding) = %s
-            ORDER BY embedding <=> %s::vector, id
-            LIMIT %s
-        """, (str(query_embedding), VOYAGE_MODEL, EMBED_DIM, str(query_embedding), pool))
-        vector_rows = cur.fetchall()
-    except Exception as exc:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        raise QueryError("search backend is unavailable", code="search_unavailable") from exc
+    vector_rows = []
+    if config.dense:
+        _t0 = time.perf_counter()
+        try:
+            cur.execute("""
+                SELECT id, content, 1 - (embedding <=> %s::vector) as vscore,
+                       timestamp_start, session_id, source_type, embedding::text, created_at,
+                       embedding_model, vector_dims(embedding)
+                FROM session_chunks
+                WHERE embedding IS NOT NULL
+                  AND embedding_model = %s
+                  AND vector_dims(embedding) = %s
+                ORDER BY embedding <=> %s::vector, id
+                LIMIT %s
+            """, (str(query_embedding), VOYAGE_MODEL, EMBED_DIM, str(query_embedding), pool))
+            vector_rows = cur.fetchall()
+        except Exception as exc:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            raise QueryError("search backend is unavailable", code="search_unavailable") from exc
+        _dense_s = time.perf_counter() - _t0
+    else:
+        _dense_s = 0.0
+
+    # Phase 4D trace: dense (vector) stage. Disabled stages emit only a
+    # stage_disabled summary with the (real, ~0) elapsed time; no candidates.
+    if config.dense:
+        dense_events = [
+            {
+                "doc_id": row[0],
+                "session_id": row[4],
+                "source_type": row[5],
+                "rank": rank,
+                "score": row[2],
+                "reason": "vector",
+            }
+            for rank, row in enumerate(vector_rows, start=1)
+        ]
+    else:
+        dense_events = []
+    _emit_eval("dense", dense_events + [{"latency_ms": _dense_s * 1000.0, "reason": "stage" if config.dense else "stage_disabled"}])
 
     # BM25 (tsvector) search -----------------------------------------------
     tsq = _build_tsquery(query)
     bm25_rows = []
-    if tsq:
+    _tsrank_s = 0.0
+    if config.lexical and tsq:
+        _t1 = time.perf_counter()
         try:
             cur.execute("""
                 SELECT id, content, ts_rank_cd(content_tsvector, to_tsquery('simple', %s)) as tscore,
@@ -428,6 +595,26 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
             # query aborts the transaction; roll it back so the pg_trgm fallback
             # below still runs on a usable connection.
             conn.rollback()
+        _tsrank_s = time.perf_counter() - _t1
+
+    # Phase 4D trace: ts_rank_cd (lexical) stage. Disabled emits only a
+    # stage_disabled summary. The trigram fallback below is a separate
+    # observable stage of the SAME lexical channel.
+    if config.lexical:
+        tsrank_events = [
+            {
+                "doc_id": row[0],
+                "session_id": row[4],
+                "source_type": row[5],
+                "rank": rank,
+                "score": row[2],
+                "reason": "ts_rank_cd",
+            }
+            for rank, row in enumerate(bm25_rows, start=1)
+        ]
+    else:
+        tsrank_events = []
+    _emit_eval("ts_rank_cd", tsrank_events + [{"latency_ms": _tsrank_s * 1000.0, "reason": "stage" if config.lexical else "stage_disabled"}])
 
     # Exact substring (ILIKE) search ---------------------------------------
     # Short queries, especially two-to-four-character CJK names, score
@@ -440,7 +627,9 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
     # third RRF channel with a bonus so entity hits surface instead of being
     # buried under temporally-recent-but-irrelevant vector neighbors.
     exact_rows = []
-    if len(query.strip()) <= 20:
+    _exact_s = 0.0
+    if config.exact and len(query.strip()) <= 20:
+        _t2 = time.perf_counter()
         try:
             escaped = _escape_like(query)
             cur.execute("""
@@ -457,9 +646,32 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
             exact_rows = cur.fetchall()
         except Exception:
             conn.rollback()
+        _exact_s = time.perf_counter() - _t2
+
+    # Phase 4D trace: exact (substring) stage. Disabled emits only a
+    # stage_disabled summary.
+    if config.exact:
+        exact_events = [
+            {
+                "doc_id": row[0],
+                "session_id": row[4],
+                "source_type": row[5],
+                "rank": rank,
+                "score": row[2],
+                "reason": "exact_substring",
+            }
+            for rank, row in enumerate(exact_rows, start=1)
+        ]
+    else:
+        exact_events = []
+    _emit_eval("exact", exact_events + [{"latency_ms": _exact_s * 1000.0, "reason": "stage" if config.exact else "stage_disabled"}])
 
     # If BM25 returned nothing, fall back to trigram similarity
-    if not bm25_rows:
+    trigram_used = False
+    trigram_rows = []
+    _trigram_s = 0.0
+    if config.lexical and not bm25_rows:
+        _t3 = time.perf_counter()
         try:
             cur.execute("""
                 SELECT id, content, similarity(content, %s) as tscore,
@@ -472,10 +684,35 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
                 ORDER BY similarity(content, %s) DESC, id
                 LIMIT %s
             """, (query, query, VOYAGE_MODEL, EMBED_DIM, query, pool))
-            bm25_rows = cur.fetchall()
+            trigram_rows = cur.fetchall()
+            trigram_used = True
+            # Preserve production behavior: the trigram results remain the
+            # lexical channel for RRF fusion below (the trace reports the same
+            # rows under the "trigram" stage name, separately observable).
+            bm25_rows = trigram_rows
         except Exception:
             conn.rollback()
-            pass
+            trigram_rows = []
+        _trigram_s = time.perf_counter() - _t3
+
+    # Phase 4D trace: trigram fallback stage. Disabled lexical emits only a
+    # stage_disabled summary. When the fallback did not run (ts_rank_cd hit),
+    # an empty event keeps the stage observable and separately distinguishable.
+    _emit_eval(
+        "trigram",
+        [
+            {
+                "doc_id": row[0],
+                "session_id": row[4],
+                "source_type": row[5],
+                "rank": rank,
+                "score": row[2],
+                "reason": "trigram_fallback",
+            }
+            for rank, row in enumerate(trigram_rows if trigram_used else [], start=1)
+        ]
+        + [{"latency_ms": _trigram_s * 1000.0, "reason": "stage" if config.lexical else "stage_disabled"}],
+    )
 
     cur.close()
     conn.close()
@@ -484,78 +721,167 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
     k = 60  # RRF constant
     scores = {}   # id -> rrf_score
     meta = {}     # id -> (content, timestamp, session_id, source_type, embedding_str, created_at, model, dim)
+    _t4 = time.perf_counter()
 
-    for rank, row in enumerate(vector_rows, 1):
-        rid, content, vscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
-        scores[rid] = scores.get(rid, 0) + 1.0 / (k + rank)
-        meta[rid] = (content, ts, sid, stype, emb_str, created_at, model, dimension)
-
-    for rank, row in enumerate(bm25_rows, 1):
-        rid, content, tscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
-        scores[rid] = scores.get(rid, 0) + 1.0 / (k + rank)
-        if rid not in meta:
+    if config.dense:
+        for rank, row in enumerate(vector_rows, 1):
+            rid, content, vscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
+            scores[rid] = scores.get(rid, 0) + 1.0 / (k + rank)
             meta[rid] = (content, ts, sid, stype, emb_str, created_at, model, dimension)
+
+    if config.lexical:
+        for rank, row in enumerate(bm25_rows, 1):
+            rid, content, tscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
+            scores[rid] = scores.get(rid, 0) + 1.0 / (k + rank)
+            if rid not in meta:
+                meta[rid] = (content, ts, sid, stype, emb_str, created_at, model, dimension)
 
     # Exact-substring hits get a rank bonus so entity/name matches are not
     # buried: they are treated as if they ranked at position 1 in their own
     # channel (1/(k+1), approximately 0.0164) plus the fact that BM25/vector
     # may also hit.
     # This deliberately favors literal containment for short queries.
-    for rank, row in enumerate(exact_rows, 1):
-        rid, content, tscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
-        bonus_rank = 1  # exact matches rank at the top of their channel
-        scores[rid] = scores.get(rid, 0) + 1.0 / (k + bonus_rank)
-        if rid not in meta:
-            meta[rid] = (content, ts, sid, stype, emb_str, created_at, model, dimension)
+    if config.exact:
+        for rank, row in enumerate(exact_rows, 1):
+            rid, content, tscore, ts, sid, stype, emb_str, created_at, model, dimension = _unpack_search_row(row)
+            bonus_rank = 1  # exact matches rank at the top of their channel
+            scores[rid] = scores.get(rid, 0) + 1.0 / (k + bonus_rank)
+            if rid not in meta:
+                meta[rid] = (content, ts, sid, stype, emb_str, created_at, model, dimension)
+    _rrf_s = time.perf_counter() - _t4
+
+    # Phase 4D trace: rrf fusion stage (pre-temporal). RRF is the multi-channel
+    # fusion mechanism (always applied over enabled channels); it is never a
+    # disabled stage. Rank by descending score.
+    rrf_ranked = sorted(scores, key=lambda rid: (-scores[rid], str(rid)))
+    _emit_eval(
+        "rrf",
+        [
+            {
+                "doc_id": rid,
+                "session_id": meta[rid][2],
+                "source_type": meta[rid][3],
+                "rank": rank,
+                "score": scores[rid],
+                "reason": "rrf",
+            }
+            for rank, rid in enumerate(rrf_ranked, start=1)
+        ]
+        + [{"latency_ms": _rrf_s * 1000.0, "reason": "stage"}],
+    )
 
     # Temporal decay --------------------------------------------------------
-    for rid in scores:
-        content, ts, sid, stype, emb_str, created_at, model, dimension = meta[rid]
-        eff_ts = ts if ts is not None else created_at
-        if eff_ts:
-            days_old = (now - eff_ts).total_seconds() / 86400
-            decay = 2 ** (-days_old / HALF_LIFE_DAYS)
-            scores[rid] *= decay
-        else:
-            # Both timestamp and created_at are NULL (rare). Don't skip decay
-            # (which would rank it as brand-new); apply a fixed low prior.
-            scores[rid] *= NULL_TS_PRIOR
+    _temporal_s = 0.0
+    if config.temporal:
+        _t6 = time.perf_counter()
+        for rid in scores:
+            content, ts, sid, stype, emb_str, created_at, model, dimension = meta[rid]
+            eff_ts = ts if ts is not None else created_at
+            if eff_ts:
+                days_old = (now - eff_ts).total_seconds() / 86400
+                decay = 2 ** (-days_old / HALF_LIFE_DAYS)
+                scores[rid] *= decay
+            else:
+                # Both timestamp and created_at are NULL (rare). Don't skip decay
+                # (which would rank it as brand-new); apply a fixed low prior.
+                scores[rid] *= NULL_TS_PRIOR
+        _temporal_s = time.perf_counter() - _t6
+
+    # Phase 4D trace: temporal decay stage (post-decay, pre-sort). Disabled
+    # emits only a stage_disabled summary (no decay applied). Rank by
+    # descending score. Allowlist only.
+    temporal_ranked = sorted(scores, key=lambda rid: (-scores[rid], str(rid)))
+    if config.temporal:
+        temporal_events = [
+            {
+                "doc_id": rid,
+                "session_id": meta[rid][2],
+                "source_type": meta[rid][3],
+                "rank": rank,
+                "score": scores[rid],
+                "reason": "temporal_decay",
+            }
+            for rank, rid in enumerate(temporal_ranked, start=1)
+        ]
+    else:
+        temporal_events = []
+    _emit_eval("temporal", temporal_events + [{"latency_ms": _temporal_s * 1000.0, "reason": "stage" if config.temporal else "stage_disabled"}])
 
     # Sort by decayed RRF score --------------------------------------------
     ranked = sorted(scores.keys(), key=lambda rid: (-scores[rid], str(rid)))
 
     # MMR deduplication -----------------------------------------------------
-    selected = []
-    selected_embeddings = []
+    _t5 = time.perf_counter()
+    if config.dedup:
+        # Enabled: run the MMR loop (parses embeddings, calls _cosine_sim) and
+        # record keep/drop decisions with stable reason codes.
+        selected = []
+        selected_ids: list[str] = []
+        selected_embeddings = []
+        dedup_events: list[dict] = []
+        for rid in ranked:
+            if len(selected) >= result_limit:
+                break
 
-    for rid in ranked:
-        if len(selected) >= result_limit:
-            break
+            content, ts, sid, stype, emb_str, created_at, model, dimension = meta[rid]
 
-        content, ts, sid, stype, emb_str, created_at, model, dimension = meta[rid]
+            # Parse embedding for MMR comparison
+            too_similar = False
+            if emb_str and selected_embeddings:
+                try:
+                    emb = [float(x) for x in emb_str.strip("[]").split(",")]
+                    for sel_emb in selected_embeddings:
+                        if _cosine_sim(emb, sel_emb) > MMR_SIM_THRESHOLD:
+                            too_similar = True
+                            break
+                    if too_similar:
+                        dedup_events.append({
+                            "doc_id": rid,
+                            "session_id": sid,
+                            "source_type": stype,
+                            "rank": len(selected) + 1,
+                            "score": scores[rid],
+                            "reason": "mmr_dedup",
+                        })
+                        continue
+                    selected_embeddings.append(emb)
+                except (ValueError, AttributeError):
+                    pass
+            elif emb_str:
+                try:
+                    emb = [float(x) for x in emb_str.strip("[]").split(",")]
+                    selected_embeddings.append(emb)
+                except (ValueError, AttributeError):
+                    pass
 
-        # Parse embedding for MMR comparison
-        if emb_str and selected_embeddings:
-            try:
-                emb = [float(x) for x in emb_str.strip("[]").split(",")]
-                too_similar = False
-                for sel_emb in selected_embeddings:
-                    if _cosine_sim(emb, sel_emb) > MMR_SIM_THRESHOLD:
-                        too_similar = True
-                        break
-                if too_similar:
-                    continue
-                selected_embeddings.append(emb)
-            except (ValueError, AttributeError):
-                pass
-        elif emb_str:
-            try:
-                emb = [float(x) for x in emb_str.strip("[]").split(",")]
-                selected_embeddings.append(emb)
-            except (ValueError, AttributeError):
-                pass
-
-        selected.append((content, scores[rid], ts, sid, stype, model, dimension))
+            selected.append((content, scores[rid], ts, sid, stype, model, dimension))
+            selected_ids.append(rid)
+            dedup_events.append({
+                "doc_id": rid,
+                "session_id": sid,
+                "source_type": stype,
+                "rank": len(selected),
+                "score": scores[rid],
+                "reason": "mmr_keep",
+            })
+        _dedup_s = time.perf_counter() - _t5
+        selected_events = dedup_events
+    else:
+        # Disabled: TRUE bypass. Branch BEFORE the MMR loop so no embedding is
+        # parsed and _cosine_sim is never called; take the ranked candidates
+        # directly (undeduped) and emit a stage_disabled summary.
+        _dedup_s = time.perf_counter() - _t5
+        selected_events = []
+        selected = [
+            (meta[rid][0], scores[rid], meta[rid][1], meta[rid][2], meta[rid][3], meta[rid][6], meta[rid][7])
+            for rid in ranked[:result_limit]
+        ]
+        selected_ids = list(ranked[:result_limit])
+    _emit_eval(
+        "dedup",
+        selected_events
+        + [{"latency_ms": _dedup_s * 1000.0, "reason": "stage" if config.dedup else "stage_disabled"}],
+    )
 
     return selected[offset : offset + limit]
 
