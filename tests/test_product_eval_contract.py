@@ -739,7 +739,11 @@ def test_production_stage_ablations_real_pg(db, monkeypatch):
 
     def _run(config):
         with query._eval_scope(config=config):
-            return query.search("shiori_abl_special", limit=20)
+            # `latest` expresses explicit recency intent (Phase 4E2), keeping
+            # temporal decay active so the recent row outranks the older
+            # lexical-only doc under dense-only; the ablation assertion about
+            # the lexical channel is preserved.
+            return query.search("latest shiori_abl_special", limit=20)
 
     full = _run(query.StageConfig())
     dense_only = _run(query.StageConfig(lexical=False, exact=False))

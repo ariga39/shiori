@@ -20,6 +20,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[1]
 PRODUCT_EVAL = REPO / "benchmark" / "product_eval"
 RESULTS = PRODUCT_EVAL / "baseline_72_results.json"
@@ -193,3 +195,55 @@ def test_task11_baseline_byte_stable():
         "benchmark/run_benchmark.py": "46a1adac0db1ec7a715834724373b8f82220356409dba249a0c354bf95a8d117",
     }.items():
         assert _sha256_bytes((REPO / rel).read_bytes()) == expected, f"{rel} drifted"
+
+
+# ── Phase 4E2 independent 72-dev measurement closure (task #29) ──────────────
+
+
+P4E2_RESULTS = PRODUCT_EVAL / "phase4e2_72_results.json"
+P4E2_MANIFEST = PRODUCT_EVAL / "phase4e2_72_manifest.json"
+P4E2_REPORT = PRODUCT_EVAL / "phase4e2_72_report.md"
+P4E2_RESULTS_SHA = "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e"
+
+
+def test_phase4e2_results_sha_and_ids():
+    if not P4E2_RESULTS.exists():
+        pytest.skip("phase4e2 results not committed")
+    assert _sha256_bytes(P4E2_RESULTS.read_bytes()) == P4E2_RESULTS_SHA
+    results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    splits = {s["query_id"]: s["split"] for s in json.loads(DATASET_MANIFEST.read_text(encoding="utf-8"))["query_splits"]}
+    dev = {q for q, s in splits.items() if s == "tune"}
+    holdout = {q for q, s in splits.items() if s == "holdout"}
+    assert len(results["smoke_query_ids"]) == 72
+    assert set(results["smoke_query_ids"]) == dev
+    assert set(results["smoke_query_ids"]).isdisjoint(holdout)
+    for config_name, traces in results["traces"].items():
+        assert set(traces.keys()) == dev, f"{config_name} traces not exactly 72 dev"
+
+
+def test_phase4e2_manifest_closure():
+    if not P4E2_MANIFEST.exists() or not P4E2_RESULTS.exists() or not P4E2_REPORT.exists():
+        pytest.skip("phase4e2 deliverables not committed")
+    m = json.loads(P4E2_MANIFEST.read_text(encoding="utf-8"))
+    assert m["result_file_sha256"] == _sha256_bytes(P4E2_RESULTS.read_bytes())
+    assert m["report_file_sha256"] == _sha256_bytes(P4E2_REPORT.read_bytes())
+    assert m["dev_set"]["query_count"] == 72
+    # Pinned 72-dev vectors match the frozen Phase 4D pin.
+    assert m["local_run_inputs"]["dev_query_vectors.json"]["sha256"] == "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2"
+    # Report byte-equals the unchanged generator output (offline closure).
+    from benchmark.product_eval.build_report import _generate
+
+    results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    generated = _generate(results, m)
+    assert generated == P4E2_REPORT.read_text(encoding="utf-8")
+
+
+def test_phase4e2_report_derives_from_results():
+    if not P4E2_REPORT.exists() or not P4E2_RESULTS.exists():
+        pytest.skip("phase4e2 deliverables not committed")
+    results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    report = P4E2_REPORT.read_text(encoding="utf-8")
+    for cfg in results["configs"]:
+        assert cfg in report
+    assert "72 development queries" in report
+    assert "Holdout (48) untouched" in report

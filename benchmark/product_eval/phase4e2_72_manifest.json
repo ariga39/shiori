@@ -1,0 +1,166 @@
+{
+  "adapters_not_run": {
+    "longmemeval": {
+      "not_run_reason": "user-supplied local data; raw/derived rows not committed; redistribution=unresolved",
+      "status": "local_only"
+    },
+    "miracl": {
+      "not_run_reason": "not_run / not_comparable_to_official; no corpus download, no committed topics/qrels",
+      "status": "adapter_only"
+    },
+    "nfcorpus": {
+      "not_run_reason": "official archive is user-supplied local-only (MD5 pinned a89dba18\u2026); not run in this measurement",
+      "status": "local_only"
+    }
+  },
+  "base_sha": "e2696653b119220de75e1e1fec49e6063e24fbd9",
+  "committed_inputs_sha256": {
+    "corpus_schema.json": "6c991bb0d3ceeb3db3500d8898a8cf24131a7a48575ffc128ad31093885bbd3d",
+    "dataset_manifest.json": "b951d799d251046cef513cde5ac6153e11f3d0e434f01841f11380890bc93d74",
+    "dataset_manifest.schema.json": "b4de97056e66f8d50e11288bb1d0b18b38b5cf091d0bedd96eaa9dafd9b68353",
+    "evidence_ledger.json": "7941af743d0f263981a1a2fb2f1fe3b5b856ec14a5c2dc498233b56c5eb40e8c",
+    "fixtures/corpus.jsonl": "927584aa88a5a2c0223cce75ca001a5df75d5ac5689dfd64e598432de481de58",
+    "fixtures/judgments.jsonl": "acfc5aeaeaccb207ef2b18a74a9e325f09ed4cbfe41aa05f94959a7d380c005b",
+    "golden_queries.jsonl": "d3d8b0167c1fa8d0c142f587f5c4872296320cb4b22d90b5cfb68d469d932970"
+  },
+  "dev_set": {
+    "id_set_sha256": "c4ae751baeb3ac7dd7c8255c9830867b6a0ca68f04d3e055f119963633b1ab5c",
+    "query_count": 72,
+    "query_ids": [
+      "q-0001",
+      "q-0002",
+      "q-0003",
+      "q-0004",
+      "q-0005",
+      "q-0006",
+      "q-0007",
+      "q-0008",
+      "q-0009",
+      "q-0016",
+      "q-0017",
+      "q-0018",
+      "q-0019",
+      "q-0020",
+      "q-0021",
+      "q-0022",
+      "q-0023",
+      "q-0024",
+      "q-0031",
+      "q-0032",
+      "q-0033",
+      "q-0034",
+      "q-0035",
+      "q-0036",
+      "q-0037",
+      "q-0038",
+      "q-0039",
+      "q-0040",
+      "q-0041",
+      "q-0042",
+      "q-0051",
+      "q-0052",
+      "q-0053",
+      "q-0054",
+      "q-0055",
+      "q-0056",
+      "q-0057",
+      "q-0058",
+      "q-0059",
+      "q-0066",
+      "q-0067",
+      "q-0068",
+      "q-0069",
+      "q-0070",
+      "q-0071",
+      "q-0072",
+      "q-0073",
+      "q-0074",
+      "q-0081",
+      "q-0082",
+      "q-0083",
+      "q-0084",
+      "q-0085",
+      "q-0086",
+      "q-0096",
+      "q-0097",
+      "q-0098",
+      "q-0099",
+      "q-0100",
+      "q-0101",
+      "q-0102",
+      "q-0103",
+      "q-0104",
+      "q-0111",
+      "q-0112",
+      "q-0113",
+      "q-0114",
+      "q-0115",
+      "q-0116",
+      "q-0117",
+      "q-0118",
+      "q-0119"
+    ]
+  },
+  "local_run_inputs": {
+    "dev_query_vectors.json": {
+      "committed": false,
+      "generator": "tools/generate_dev_query_vectors.py",
+      "generator_version": "1",
+      "purpose": "offline 72-dev query embeddings for the baseline run (pinned voyage-4-nano)",
+      "sha256": "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2"
+    },
+    "doc_id_map.json": {
+      "committed": false,
+      "generator": "tools/phase4d_ingest_corpus.py",
+      "generator_version": "1",
+      "purpose": "DB uuid -> fixture doc id mapping produced by local corpus ingest",
+      "sha256": "e737f5b77d5229e56a74388ac672eed91950c0b3bb421bab7359cbadabac905f"
+    }
+  },
+  "manifest_version": "2",
+  "model": {
+    "dim": 1024,
+    "document_encode": "encode_document",
+    "dtype": "float32",
+    "embedding_provider": "replay-local",
+    "id": "voyageai/voyage-4-nano",
+    "identity": "voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f",
+    "normalization": "L2",
+    "query_encode": "encode_query",
+    "revision": "67fabc9bef010dabc5f6024aa1b1b6b93410426f"
+  },
+  "postprocess": {
+    "name": "benchmark.product_eval.postprocess",
+    "version": "1"
+  },
+  "report_file_sha256": "9bdfdac92512d7d18fcf3e5de2994511dd463abe034582cc926fc2089cb7eead",
+  "report_generator": {
+    "name": "benchmark.product_eval.build_report",
+    "version": "1"
+  },
+  "result_file_sha256": "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e",
+  "runner": {
+    "configs": [
+      "+dedup",
+      "+exact",
+      "+temporal",
+      "dense-only",
+      "lexical-only",
+      "rrf"
+    ],
+    "name": "benchmark.product_eval.runner",
+    "version": "1"
+  },
+  "runtime": {
+    "pgvector": "0.8.6",
+    "platform": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
+    "postgresql": "17.10 (Debian 17.10-1.pgdg12+1)",
+    "psycopg2": "2.9.12 (dt dec pq3 ext lo64)",
+    "python": "3.13.15"
+  },
+  "schema": {
+    "corpus_schema": "2",
+    "dataset_manifest_schema": "1",
+    "results_schema": "1"
+  }
+}

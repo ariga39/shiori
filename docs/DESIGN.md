@@ -320,6 +320,32 @@ score *= decay
 
 （`query.py:24`、`:193-204`）以 `timestamp_start` 计算距今天数，半衰期 30 天，即记忆每 30 天权重折半。
 
+**Phase 4E2 intent-gated decay（2026-08-12，task #29）：** 时间衰减仅在**显式时间意图**下应用，而不是无条件作用于每个查询：
+
+```
+temporal_gate = config.temporal AND (
+    structured_time_bounds(time_from OR time_to on SearchFilters)
+    OR recency_intent(query_text)
+)
+```
+
+- 普通事实/历史查询（无结构化时间边界、无文本时间意图）**不衰减**：旧的但更相关的记忆不会因其年龄单独被压低。
+- **文本 recency grammar（bounded，已冻结，`query.py` `_has_recency_intent`）**：NFKC+casefold 后——
+  1. 英文独立 token `latest`（token boundary，`(?<!\w)latest(?!\w)`）→ 明确偏好最新；
+  2. 英文否决 `not latest` / `not the latest`（`(?<!\w)not\s+(?:the\s+)?latest(?!\w)`）→ 保守关闭文本 decay；
+  3. 中日前缀 `最新` / `直近`（`lstrip()` 后 `startswith`）→ 明确偏好最新/近期；
+  4. 日文否定前缀 `最新ではない` / `直近ではない` → 关闭文本 decay；
+  5. 英文相对天数 `last <1..365> day|days` → 明确近期意图；
+  6. 中文相对天数 `过去 <1..365> 天`（anchored 前缀）→ 明确近期意图；
+  7. 日文相对天数 `過去 <1..365> 日`（anchored 前缀）→ 明确近期意图。
+- 未识别/歧义文本保守为 **no-decay**；任意 absolute date 单独出现不表示“偏好最新”。CJK/全角数字经 NFKC 折叠；范围外（0/366+/四位数/非 ASCII 残留）不命中。**不加词表、不做任意位置关键词扫描**。
+- 结构化 time bounds 与文本 intent 是 **OR**；decay 公式 `2^(-days_old/HALF_LIFE_DAYS)`、`HALF_LIFE_DAYS`、`NULL_TS_PRIOR` 与 MMR/abstention 均未改动。
+
+**已知 dev caveats（72-development，2026-08-12，仅记录不调参）：**
+- `q-0057` 的 `latest` 确实触发冻结 decay：把 grade-2 `doc-0012` 提到第 1，却把 grade-3 `doc-0011` 从第 3 压到第 12，使该 query Recall@5=1/2。证明 intent gate 正常，暴露的是冻结的无条件 30-day 公式在复合 `latest` 查询上仍可能压过语义相关度；本任务禁止调公式，记为后续风险。
+- duplicate 桶 `q-0086`：普通查询关闭 decay 后，grade-2 `doc-0021` 从第 3 变第 4、非相关 `doc-0019` 到第 3，nDCG@10 确定性微降（`1.0→0.997316`）。这是确定性的微小退化，如实记录，不是 tie/noise。
+- `phase4e2_72_results.json`/`phase4e2_72_manifest.json`/`phase4e2_72_report.md` 是**独立命名的 Phase 4E2 测量**，与 task #11/4D `baseline_72_*` 及 task #25/4E1 `filter_eval_*` 分开；测量不构成 release threshold。postprocess 的 source/session/time `9/9/3` 是对未带过滤器 runner trace 套 ledger 的 counterfactual 指标，**不是** 4E1 主动过滤泄漏回归（后者仍为 4E1 `0/0/0` + 本任务 public filter tests）。
+
 **NULL-ts 兜底语义（2026-08-03 更新，对应 NB-C4-04 / NB-C5-05 / NB-C5-06）：** 时间戳解析失败时，`ingest.py` / `ingest_discord.py` 的 `store_chunks` **主路径写入文件 mtime** 作为 `timestamp_start` 兜底（`fallback_ts` 参数，`ingest.py:365`）——这比 INSERT 的 `created_at` 更接近消息时间，且重摄取同一文件（mtime 不变）不会把旧记忆「变新」、同批 NULL-ts 块衰减仍有区分度。**仅当 `fallback_ts=None`（`store_chunks` 旧签名 / API 默认 / 老调用）时才保留 `timestamp_start=NULL`**（`test_bad_timestamp_stores_null` 覆盖）；因此「不可解析时间戳存 NULL」的表述已更正——主路径不再存 NULL，NULL 仅是 `fallback_ts=None` 时的残留。
 
 > ⚠️ **mtime 兜底的局限（NB-C5-06）：** mtime 是**文件修改时间，不是消息时间**。会话 JSONL 以追加方式写入，追加后整个文件的 mtime≈最近写入时刻，会把该文件内**历史坏 ts 的块整体抬成近期记忆**（它们共享新 mtime），造成时间衰减曲线失真。当前库里 null-ts 行数为 0，属**潜伏债**——一旦出现 fallback_ts=None 的旧调用或坏 ts 块，就会暴露。缓解方向：优先用文件内其它消息的 ts 作为 fallback_ts（而非 mtime），或拆分按消息时间归档；改动面大，暂只文档化。

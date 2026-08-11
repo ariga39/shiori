@@ -4,6 +4,7 @@ import psycopg2
 import pytest
 
 import query
+from query import SearchFilters
 
 # Fixed unit vector along the first axis; query embedding is mocked to this.
 QUERY_EMB = [1.0] + [0.0] * 1023
@@ -66,7 +67,12 @@ def test_temporal_decay_ranks_recent_higher(db, mock_embed):
     # must reverse their order: old 1.0 * 2^-4 = 0.0625 < recent 0.5 * 1.0.
     _insert(conn, sid, "shiori_test_old_item", QUERY_EMB, old)
     _insert(conn, sid, "shiori_test_new_item", FAR_EMB, now)
-    res = query.search("zzqx no-bm25-match 9", limit=300)
+    # Explicit temporal intent (Phase 4E2): a structured lower bound covering
+    # both rows keeps the original 30-day decay active for this query.
+    filters = SearchFilters.from_inputs(
+        session_ids=[sid], time_from=old - timedelta(days=1)
+    )
+    res = query.search("zzqx no-bm25-match 9", limit=300, filters=filters)
     mine = [r for r in res if r[3] == sid]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
@@ -84,7 +90,11 @@ def test_null_ts_uses_created_at_for_decay(db, mock_embed):
     # it would score a flat 1.0 and outrank the recent chunk; with created_at
     # fallback it decays by created_at: 1.0 * 2^-2 = 0.25 < 0.5.
     _insert(conn, sid, "shiori_test_null_old_x", QUERY_EMB, None, created_at=old)
-    res = query.search("zzqx no-bm25-match 5", limit=300)
+    # Explicit recency intent via a standalone `latest` token (Phase 4E2): the
+    # original decay (with created_at fallback for the NULL-ts row) stays
+    # active.  Regression maintenance of the pre-4E2 fallback contract, not a
+    # new TDD red.
+    res = query.search("latest zzqx no-bm25-match 5", limit=300)
     mine = [r for r in res if r[3] == sid]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
@@ -225,7 +235,11 @@ def test_double_null_uses_null_ts_prior(db, mock_embed):
     # Without the prior it would have the higher pre-decay score and rank above.
     _insert(conn, sid, "shiori_test_dn_recent zzqxmarker", FAR_EMB, now)
     _insert_double_null(conn, sid, "shiori_test_dn_null zzqxmarker", QUERY_EMB)
-    res = query.search("zzqxmarker", limit=300)
+    # Explicit recency intent via a standalone `latest` token (Phase 4E2): the
+    # original decay + NULL_TS_PRIOR for the double-NULL row stays active.
+    # Regression maintenance of the pre-4E2 fallback contract, not a new TDD
+    # red.
+    res = query.search("latest zzqxmarker", limit=300)
     mine = [r for r in res if r[3] == sid]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
