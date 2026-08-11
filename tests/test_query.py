@@ -101,15 +101,18 @@ def test_null_ts_uses_created_at_for_decay(db, mock_embed):
     assert contents.index("shiori_test_recent_x") < contents.index("shiori_test_null_old_x")
 
 
-def test_mmr_dedups_near_duplicate_embeddings(db, mock_embed):
+def test_mmr_keeps_distinct_content_despite_identical_embeddings(db, mock_embed):
     conn, prefix = db
     sid = prefix + "-mmr"
     now = datetime.now(UTC)
+    # Two byte-different chunks in the same session with IDENTICAL embeddings.
+    # The provenance-aware contract keeps both: distinct content is separate
+    # evidence regardless of embedding similarity.
     _insert(conn, sid, "shiori_test_dup_a", QUERY_EMB, now)
     _insert(conn, sid, "shiori_test_dup_b", QUERY_EMB, now)
     res = query.search("zzqx no-bm25-match 7", limit=20)
     mine = [r[0] for r in res if r[3] == sid]
-    assert len(mine) == 1, "MMR should collapse identical-embedding chunks"
+    assert set(mine) == {"shiori_test_dup_a", "shiori_test_dup_b"}
 
 
 def test_tsvector_bm25_match_ranks_first(db, mock_embed):
