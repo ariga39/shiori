@@ -82,3 +82,20 @@ def test_dedup_collapses_exact_duplicate_in_same_provenance(replay_query, db):
     mine = [(row[0], row[3]) for row in results if row[3] == session_id]
 
     assert mine == [(A, session_id)]
+
+
+def test_dedup_keeps_identical_content_across_sessions(replay_query, db):
+    conn, prefix = db
+    session_id_a = prefix + "-sess-a"
+    session_id_b = prefix + "-sess-b"
+    now = datetime.now(UTC)
+    # Byte-identical A in two distinct sessions: identical embedding,
+    # source_type, and time semantics, but different session_id provenance.
+    # Both must survive dedup because provenance differs.
+    _insert(conn, session_id_a, A, replay_query.embed(A, input_type="document"), now)
+    _insert(conn, session_id_b, A, replay_query.embed(A, input_type="document"), now)
+
+    results = query.search(QUERY, limit=20)
+    mine = sorted((row[0], row[3]) for row in results if row[3] in (session_id_a, session_id_b))
+
+    assert mine == sorted([(A, session_id_a), (A, session_id_b)])
