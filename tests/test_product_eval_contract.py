@@ -742,8 +742,10 @@ def test_production_stage_ablations_real_pg(db, monkeypatch):
             # `latest` expresses explicit recency intent (Phase 4E2), keeping
             # temporal decay active so the recent row outranks the older
             # lexical-only doc under dense-only; the ablation assertion about
-            # the lexical channel is preserved.
-            return query.search("latest shiori_abl_special", limit=20)
+            # the lexical channel is preserved.  limit=1 keeps the assertion
+            # free of the superseded dedup contract (identical-embedding rows
+            # with distinct content are no longer collapsed).
+            return query.search("latest shiori_abl_special", limit=1)
 
     full = _run(query.StageConfig())
     dense_only = _run(query.StageConfig(lexical=False, exact=False))
@@ -751,11 +753,11 @@ def test_production_stage_ablations_real_pg(db, monkeypatch):
     mine_full = [r[0] for r in full if r[3] == sid]
     mine_dense = [r[0] for r in dense_only if r[3] == sid]
 
-    assert mine_full, "full config returned no session results"
-    # The lexical-only doc surfaces under full but not under dense-only.
-    assert "shiori_abl_special keyword target" in mine_full
-    assert "shiori_abl_special keyword target" not in mine_dense
-    assert mine_full != mine_dense, "dense-only ablation did not remove the lexical-only doc"
+    # Human-spec literal expected: under full config the lexical/exact token
+    # hit wins the single slot; under dense-only the explicit `latest` decay
+    # picks the recent row (identical dense embedding, newer timestamp).
+    assert mine_full == ["shiori_abl_special keyword target"]
+    assert mine_dense == ["shiori_abl_new_item recent"]
 
 
 def test_stage_config_switch_matrix_real_pg(db, monkeypatch):
