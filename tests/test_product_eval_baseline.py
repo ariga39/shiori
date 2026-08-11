@@ -301,3 +301,108 @@ def test_build_report_cli_honors_phase4e2_title_and_notes(tmp_path):
     # The two stale/incorrect Known-gaps claims are gone.
     assert "does not apply source/session/time filters" not in text
     assert "+temporal degrades the temporal and filter buckets" not in text
+
+
+# ── Phase 4E3 formal results closure (genuine red, task #33) ────────────────
+
+
+P4E3_RESULTS = PRODUCT_EVAL / "phase4e3_72_results.json"
+P4E3_RESULTS_SHA = "91cf669144daef112309895324f17f23bc4063acc5c740d73ffcf451e02796a9"
+
+
+def _p4e3_split_ids():
+    splits = json.loads(DATASET_MANIFEST.read_text(encoding="utf-8"))["query_splits"]
+    dev = {s["query_id"] for s in splits if s["split"] == "tune"}
+    holdout = {s["query_id"] for s in splits if s["split"] == "holdout"}
+    return dev, holdout
+
+
+def test_phase4e3_results_and_dedup_contract():
+    """Genuine-red closure for the committed Phase 4E3 results.
+
+    The formal results file is NOT yet committed, so this test must fail on a
+    missing file (no fallback to `.generated`).  Once present, it pins the
+    exact SHA and verifies the provenance-aware dedup contract end to end.
+    """
+    if not P4E3_RESULTS.exists():
+        pytest.fail(f"formal phase4e3 results missing at {P4E3_RESULTS}")
+
+    assert _sha256_bytes(P4E3_RESULTS.read_bytes()) == P4E3_RESULTS_SHA
+    results = json.loads(P4E3_RESULTS.read_text(encoding="utf-8"))
+
+    # Exact 72 development ids, disjoint from the 48 holdout ids.
+    dev, holdout = _p4e3_split_ids()
+    assert len(results["smoke_query_ids"]) == 72
+    assert set(results["smoke_query_ids"]) == dev
+    assert set(results["smoke_query_ids"]).isdisjoint(holdout)
+
+    # First-five configs: configs/buckets/candidate_sources/
+    # filter_leakage_by_tag/temporal_pairs equal the committed Phase 4E2.
+    p4e2 = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
+    first_five = ["dense-only", "lexical-only", "rrf", "+exact", "+temporal"]
+    for name in first_five:
+        assert results["configs"][name] == p4e2["configs"][name], f"config drift: {name}"
+        assert results["buckets"][name] == p4e2["buckets"][name], f"bucket drift: {name}"
+        assert results["candidate_sources"][name] == p4e2["candidate_sources"][name], f"source drift: {name}"
+        assert results["filter_leakage_by_tag"][name] == p4e2["filter_leakage_by_tag"][name], f"leakage drift: {name}"
+        assert results["temporal_pairs"] == p4e2["temporal_pairs"], "temporal_pairs drift"
+
+    # Trace equivalence ignores latency and time-dependent scores: project each
+    # trace event to (stage, doc_id, rank, reason) only.
+    for name in first_five:
+        o = {
+            qid: [(e["stage"], e["doc_id"], e["rank"], e["reason"]) for e in evs]
+            for qid, evs in p4e2["traces"][name].items()
+        }
+        n = {
+            qid: [(e["stage"], e["doc_id"], e["rank"], e["reason"]) for e in evs]
+            for qid, evs in results["traces"][name].items()
+        }
+        assert n == o, f"trace drift: {name}"
+
+    # +dedup fixed observable literals (frozen from the measured run).
+    d = results["configs"]["+dedup"]
+    assert d["final_recall@5"] == 0.9603174603174603
+    assert d["final_mrr@10"] == 0.9497354497354498
+    assert d["final_ndcg@10"] == 0.9101678917360182
+    assert d["coverage_risk_dropped_relevant"] == 5
+    assert d["dedup_drop_rate"] == 0.05339105339105339
+    assert d["duplicate_group_coverage"] == 1.0
+    assert d["no_evidence_false_return"] == 9
+    assert d["filter_leakage"] == 9
+    assert results["filter_leakage_by_tag"]["+dedup"] == {
+        "source_filter": 9,
+        "session_filter": 9,
+        "time_filter": 3,
+    }
+
+    # Recovered distinct evidence (from the public sanitized +dedup trace).
+    dedup_trace = results["traces"]["+dedup"]
+    recovered = {
+        (qid, doc)
+        for qid, evs in dedup_trace.items()
+        for e in evs
+        if e.get("reason") == "mmr_keep"
+    }
+    for qid, doc in [
+        ("q-0009", "doc-0016"),
+        ("q-0024", "doc-0015"),
+        ("q-0055", "doc-0015"),
+        ("q-0056", "doc-0016"),
+        ("q-0074", "doc-0016"),
+        ("q-0117", "doc-0015"),
+        ("q-0039", "doc-0002"),
+    ]:
+        assert (qid, doc) in recovered, f"expected recovered keep {(qid, doc)}"
+
+    # True duplicates still fold, with the byte-identical representative kept.
+    dropped = {
+        (qid, doc)
+        for qid, evs in dedup_trace.items()
+        for e in evs
+        if e.get("reason") == "mmr_dedup"
+    }
+    for qid in ("q-0041", "q-0042", "q-0073", "q-0086", "q-0116"):
+        assert (qid, "doc-0017") in dropped, f"expected true-duplicate drop {qid}/doc-0017"
+        assert (qid, "doc-0018") in recovered, f"expected representative keep {qid}/doc-0018"
+    assert ("q-0042", "doc-0019") in recovered, "expected q-0042 zh representative doc-0019 keep"
