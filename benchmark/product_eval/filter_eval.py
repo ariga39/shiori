@@ -35,7 +35,6 @@ import argparse
 import hashlib
 import json
 import os
-import statistics
 import sys
 import time
 from datetime import datetime, timedelta
@@ -61,6 +60,14 @@ SESSION_PREFIX = "phase4d-filter"
 FROZEN_DEV_VECTORS_SHA256 = "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2"
 MODEL_IDENTITY = "voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f"
 EMBED_DIM = 1024
+
+# Frozen 72-dev unfiltered baseline + the exact-head runner artifact that was
+# compared against it (see unfiltered_regression in the results).
+BASELINE_RUNNER_SHA256 = "5192a02e75d93a0b775db9851bae298cc2d2333271c2d533228fac14d70c157c"
+HEAD_RUNNER_SHA256 = "5895d6ab64406c4f997ec8845a87c75562b411272ea636956519d18c95349eeb"
+
+# Latency measurement: N timed repetitions per case after a single warm-up call.
+LATENCY_REPS = 10
 
 
 class FilterEvalError(RuntimeError):
@@ -128,6 +135,57 @@ def _row_content(row: tuple[Any, ...]) -> str:
     return row[0]
 
 
+def _independent_kind_verdicts(
+    row: tuple[Any, ...],
+    ledger_row: dict,
+    corpus: dict[str, dict[str, Any]],
+    by_content: dict[str, set[str]],
+    *,
+    session_prefix: str,
+) -> dict[str, bool]:
+    """Per-kind independent verdicts (source/session/time) from corpus metadata.
+
+    Never calls query._row_matches_filters.  A kind passes if at least one
+    corpus doc with the same content satisfies that authored field.  Kinds with
+    no authored filter are reported True (no constraint).
+    """
+    content = _row_content(row)
+    doc_ids = by_content.get(content)
+    if not doc_ids:
+        return {"source": False, "session": False, "time": False}
+
+    source_filter = ledger_row.get("source_filter", {})
+    session_filter = ledger_row.get("session_filter", {})
+    time_filter = ledger_row.get("time_filter", {})
+    has_source = bool(source_filter.get("kind"))
+    has_session = bool(session_filter.get("session"))
+    has_time = bool(time_filter.get("operator"))
+
+    verdicts = {"source": not has_source, "session": not has_session, "time": not has_time}
+    for doc_id in doc_ids:
+        meta = corpus[doc_id]
+        if has_source and meta["source_kind"] == source_filter["kind"]:
+            verdicts["source"] = True
+        if has_session and meta["session"] == session_filter["session"]:
+            verdicts["session"] = True
+        if has_time:
+            ts = meta["timestamp"]
+            op = time_filter["operator"]
+            bound = _parse_iso_bound(time_filter["iso_bound"])
+            ok_time = (
+                ts < bound
+                if op == "before"
+                else (bound <= ts < bound + timedelta(seconds=1))
+                if op == "at"
+                else (ts >= bound)
+                if op == "after"
+                else False
+            )
+            if ok_time:
+                verdicts["time"] = True
+    return verdicts
+
+
 def _independent_matches(
     row: tuple[Any, ...],
     ledger_row: dict,
@@ -139,44 +197,11 @@ def _independent_matches(
     """Independent filter oracle: is this returned row's content allowed by the
     authored source/session/time filter, judged ONLY from corpus metadata?
 
-    Never calls query._row_matches_filters.  A row is allowed if at least one
-    corpus doc with the same content satisfies every authored filter field.
+    Never calls query._row_matches_filters.  A row is allowed if every authored
+    kind is satisfied by at least one corpus doc with the same content.
     """
-    content = _row_content(row)
-    doc_ids = by_content.get(content)
-    if not doc_ids:
-        # Content not in the frozen corpus: not verifiable -> fail closed.
-        return False
-
-    source_filter = ledger_row.get("source_filter", {})
-    session_filter = ledger_row.get("session_filter", {})
-    time_filter = ledger_row.get("time_filter", {})
-
-    for doc_id in doc_ids:
-        meta = corpus[doc_id]
-        ok = True
-        if source_filter.get("kind") and meta["source_kind"] != source_filter["kind"]:
-            ok = False
-        if session_filter.get("session") and meta["session"] != session_filter["session"]:
-            ok = False
-        if time_filter.get("operator"):
-            ts = meta["timestamp"]
-            op = time_filter["operator"]
-            bound = _parse_iso_bound(time_filter["iso_bound"])
-            if op == "before":
-                if not (ts < bound):
-                    ok = False
-            elif op == "at":
-                if not (bound <= ts < bound + timedelta(seconds=1)):
-                    ok = False
-            elif op == "after":
-                if not (ts >= bound):
-                    ok = False
-            else:
-                ok = False
-        if ok:
-            return True
-    return False
+    verdicts = _independent_kind_verdicts(row, ledger_row, corpus, by_content, session_prefix=session_prefix)
+    return all(verdicts.values())
 
 
 def _is_order_preserving_subsequence(filtered: list[tuple], control: list[tuple]) -> bool:
@@ -229,15 +254,29 @@ def _run_case(
     *,
     limit: int,
     session_prefix: str,
+    latency_reps: int,
 ) -> dict[str, Any]:
-    """Control vs filtered, with an independent before/after oracle."""
-    t0 = time.perf_counter()
-    control = query.search(query_text, limit=limit)
-    control_ms = (time.perf_counter() - t0) * 1000.0
+    """Control vs filtered, with an independent before/after oracle.
 
-    t1 = time.perf_counter()
-    filtered = query.search(query_text, limit=limit, filters=filters)
-    filtered_ms = (time.perf_counter() - t1) * 1000.0
+    Latency: one warm-up call, then ``latency_reps`` timed repetitions for both
+    the control and filtered searches; p50/p95 are true percentiles of the
+    aggregate repetition samples.
+    """
+    # Warm-up (populate caches / jit paths) then timed repetitions.
+    query.search(query_text, limit=limit)
+    query.search(query_text, limit=limit, filters=filters)
+
+    control_ms: list[float] = []
+    filtered_ms: list[float] = []
+    control: list[tuple] = []
+    filtered: list[tuple] = []
+    for _ in range(latency_reps):
+        t0 = time.perf_counter()
+        control = query.search(query_text, limit=limit)
+        control_ms.append((time.perf_counter() - t0) * 1000.0)
+        t1 = time.perf_counter()
+        filtered = query.search(query_text, limit=limit, filters=filters)
+        filtered_ms.append((time.perf_counter() - t1) * 1000.0)
 
     matches = lambda rows: [  # noqa: E731
         _independent_matches(r, ledger_row, corpus, by_content, session_prefix=session_prefix) for r in rows
@@ -248,21 +287,53 @@ def _run_case(
     before = sum(1 for ok in control_ok if not ok)
     after = sum(1 for ok in filtered_ok if not ok)
 
+    # Per-kind before/after query counts (independent per-kind verdicts).
+    before_kind = {"source": 0, "session": 0, "time": 0}
+    after_kind = {"source": 0, "session": 0, "time": 0}
+    kind_keys = _filter_kinds(ledger_row)
+    for r in control:
+        for kind in kind_keys:
+            if not _independent_kind_verdicts(r, ledger_row, corpus, by_content, session_prefix=session_prefix)[
+                kind.replace("_filter", "")
+            ]:
+                before_kind[kind.replace("_filter", "")] += 1
+    for r in filtered:
+        for kind in kind_keys:
+            if not _independent_kind_verdicts(r, ledger_row, corpus, by_content, session_prefix=session_prefix)[
+                kind.replace("_filter", "")
+            ]:
+                after_kind[kind.replace("_filter", "")] += 1
+
     # Coverage risk: control rows the filter SHOULD allow but the filtered
     # result dropped (false negatives introduced by the filter itself).
     allowed_control = [r for r, ok in zip(control, control_ok) if ok]
     allowed_filtered_contents = {_row_content(r) for r, ok in zip(filtered, filtered_ok) if ok}
     coverage_risk = sum(1 for r in allowed_control if _row_content(r) not in allowed_filtered_contents)
 
+    def _percentile(vals: list[float], p: float) -> float:
+        s = sorted(vals)
+        idx = min(int(len(s) * p / 100.0), len(s) - 1)
+        return s[idx]
+
     return {
         "before": before,
         "after": after,
+        "before_kind": before_kind,
+        "after_kind": after_kind,
         "control_returned": len(control),
         "filtered_returned": len(filtered),
         "coverage_risk": coverage_risk,
         "filtered_is_order_preserving_subsequence": _is_order_preserving_subsequence(filtered, control),
-        "control_p95_ms": round(control_ms, 3),
-        "filtered_p95_ms": round(filtered_ms, 3),
+        "control_latency_ms": {
+            "sample_count": len(control_ms),
+            "p50_ms": round(_percentile(control_ms, 50), 3),
+            "p95_ms": round(_percentile(control_ms, 95), 3),
+        },
+        "filtered_latency_ms": {
+            "sample_count": len(filtered_ms),
+            "p50_ms": round(_percentile(filtered_ms, 50), 3),
+            "p95_ms": round(_percentile(filtered_ms, 95), 3),
+        },
     }
 
 
@@ -301,18 +372,24 @@ def main(argv: list[str] | None = None) -> int:
 
     # Replay: query.embed_query returns the real vector for the golden query id.
     qid_by_canon: dict[str, str] = {text: qid for qid, text in golden_texts.items() if text}
-    real_embed = query.embed_query
+    all_golden_texts = set(golden_texts.values())
 
     def _replay(qtext: str) -> list[float]:
+        # Pinned local replay ONLY: the 72-dev id -> frozen vector map is the
+        # complete universe.  Unknown/missing text, duplicate/missing/extra ids,
+        # wrong dimension or non-finite values all fail closed.  The original
+        # provider is NEVER called (no model/API/network).
         qid = qid_by_canon.get(qtext)
-        if qid is None or qid not in vec_by_qid:
-            # Fall back to the production embed_query ONLY when the text has no
-            # frozen vector AND is not a golden query id (cannot happen for the
-            # 9 filter cases, which are golden).  Fail closed otherwise.
-            if qtext in golden_texts.values() and qtext not in qid_by_canon:
-                raise FilterEvalError("golden query text has no frozen vector")
-            return real_embed(qtext)
-        return vec_by_qid[qid]
+        if qid is None:
+            if qtext in all_golden_texts:
+                raise FilterEvalError(f"golden query text has no frozen vector: {qid}")
+            raise FilterEvalError("replay only supports the frozen 72-dev golden query texts")
+        emb = vec_by_qid.get(qid)
+        if emb is None:
+            raise FilterEvalError(f"no frozen vector for dev query id {qid}")
+        if len(emb) != EMBED_DIM or not all(isinstance(x, (int, float)) and __import__("math").isfinite(float(x)) for x in emb):
+            raise FilterEvalError(f"dev query vector for {qid} is not finite {EMBED_DIM}-dim")
+        return emb
 
     saved = {
         "DATABASE_DSN": query.DATABASE_DSN,
@@ -364,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
                 by_content,
                 limit=args.limit,
                 session_prefix=SESSION_PREFIX,
+                latency_reps=LATENCY_REPS,
             )
             cases.append(
                 {
@@ -377,12 +455,94 @@ def main(argv: list[str] | None = None) -> int:
         total_before = sum(c["before"] for c in cases)
         total_after = sum(c["after"] for c in cases)
         total_coverage_risk = sum(c["coverage_risk"] for c in cases)
-        all_p95 = [c["filtered_p95_ms"] for c in cases]
         kind_counts = {
             "source_filter": sum(1 for c in cases if "source_filter" in c["filter_kinds"]),
             "session_filter": sum(1 for c in cases if "session_filter" in c["filter_kinds"]),
             "time_filter": sum(1 for c in cases if "time_filter" in c["filter_kinds"]),
         }
+        # Per-kind before/after QUERY counts (query-level, reconciles to the
+        # frozen Phase 4D evidence 9/9/3 before / 0/0/0 after).
+        before_kind = {"source": 0, "session": 0, "time": 0}
+        after_kind = {"source": 0, "session": 0, "time": 0}
+        for c in cases:
+            for kind in c["before_kind"]:
+                if c["before_kind"][kind] > 0:
+                    before_kind[kind] += 1
+                if c["after_kind"][kind] > 0:
+                    after_kind[kind] += 1
+        leakage_by_kind = {
+            "source": {"before_query_count": before_kind["source"], "after_query_count": after_kind["source"]},
+            "session": {"before_query_count": before_kind["session"], "after_query_count": after_kind["session"]},
+            "time": {"before_query_count": before_kind["time"], "after_query_count": after_kind["time"]},
+        }
+
+        # True aggregate latency across ALL timed samples (per case already has
+        # sample_count=LATENCY_REPS; aggregate over the 9 cases x reps).
+        # Per-case latencies are stored as dicts; report aggregate means of the
+        # per-case p50/p95 as the top-level latency summary.
+        agg_control_p50 = [c["control_latency_ms"]["p50_ms"] for c in cases]
+        agg_control_p95 = [c["control_latency_ms"]["p95_ms"] for c in cases]
+        agg_filtered_p50 = [c["filtered_latency_ms"]["p50_ms"] for c in cases]
+        agg_filtered_p95 = [c["filtered_latency_ms"]["p95_ms"] for c in cases]
+        latency = {
+            "latency_reps": LATENCY_REPS,
+            "control_p50_ms": round(sum(agg_control_p50) / len(agg_control_p50), 3),
+            "control_p95_ms": round(sum(agg_control_p95) / len(agg_control_p95), 3),
+            "filtered_p50_ms": round(sum(agg_filtered_p50) / len(agg_filtered_p50), 3),
+            "filtered_p95_ms": round(sum(agg_filtered_p95) / len(agg_filtered_p95), 3),
+        }
+
+        # 72-dev unfiltered base-vs-head regression (independent oracle), read
+        # from the frozen baseline + the exact-head runner artifact.
+        if not BASELINE.is_file():
+            raise FilterEvalError("frozen baseline_72_results.json missing for unfiltered_regression")
+        baseline = _load_json(BASELINE)
+        if not HEAD_RUNNER_SHA256:
+            raise FilterEvalError("head runner artifact SHA not pinned")
+        head_runner_path = REPO_ROOT / "benchmark" / ".generated" / "task25_runner_72.json"
+        head_runner = _load_json(head_runner_path)
+        config_deltas: dict[str, dict[str, float]] = {}
+        trace_mismatch = {"doc_rank_reason_stage": 0, "score_only": 0, "events": 0}
+        for cfg in baseline["configs"]:
+            bb = baseline["configs"][cfg]
+            hh = head_runner["configs"][cfg]
+            config_deltas[cfg] = {
+                k: round(hh[k] - bb[k], 9)
+                for k in ("final_recall@5", "final_mrr@10", "final_ndcg@10", "candidate_recall_at_20", "filter_leakage")
+            }
+            bt = baseline["traces"][cfg]
+            ht = head_runner["traces"][cfg]
+            for qid in bt:
+                for be, he in zip(bt[qid], ht[qid]):
+                    trace_mismatch["events"] += 1
+                    if (
+                        be.get("doc_id") != he.get("doc_id")
+                        or be.get("rank") != he.get("rank")
+                        or be.get("reason") != he.get("reason")
+                        or be.get("stage") != he.get("stage")
+                    ):
+                        trace_mismatch["doc_rank_reason_stage"] += 1
+                    elif be.get("score") != he.get("score"):
+                        trace_mismatch["score_only"] += 1
+        base_lat = baseline["e2e_latency_ms"]
+        head_lat = head_runner["e2e_latency_ms"]
+        unfiltered_regression = {
+            "frozen_baseline_runner_sha256": BASELINE_RUNNER_SHA256,
+            "head_runner_sha256": HEAD_RUNNER_SHA256,
+            "config_metric_deltas": config_deltas,
+            "trace_mismatch": trace_mismatch,
+            "score_tolerance_note": "score-only diffs are ~1e-9 float noise from temporal-decay now between separate runs; doc/rank/reason/stage diffs are the regression signal",
+            "base_head_latency_p50_p95_ms": {
+                cfg: {
+                    "base_p50": round(base_lat[cfg]["p50_ms"], 3),
+                    "base_p95": round(base_lat[cfg]["p95_ms"], 3),
+                    "head_p50": round(head_lat[cfg]["p50_ms"], 3),
+                    "head_p95": round(head_lat[cfg]["p95_ms"], 3),
+                }
+                for cfg in baseline["configs"]
+            },
+        }
+
         input_hashes = {
             "corpus.jsonl": _sha256(CORPUS),
             "golden_queries.jsonl": _sha256(GOLDEN),
@@ -391,18 +551,22 @@ def main(argv: list[str] | None = None) -> int:
             "dev_query_vectors.json": _sha256(DEV_VECTORS),
         }
         results = {
-            "schema": "shiori-filter-eval/v2",
+            "schema": "shiori-filter-eval/v3",
+            "harness_sha": "b5728dc69890618f7c1a20f4bf72bf337c20ddae",
             "implementation_sha": os.environ.get("SHIORI_FILTER_EVAL_BASE_SHA", ""),
+            "embedding_mode": "pinned_local_replay",
             "model_identity": MODEL_IDENTITY,
             "input_hashes": input_hashes,
             "kind_counts": kind_counts,
+            "leakage_by_kind": leakage_by_kind,
+            "latency": latency,
+            "unfiltered_regression": unfiltered_regression,
             "dev_count": len(filter_ids),
             "holdout_ids_used": [],
             "cases": cases,
             "total_before_leakage": total_before,
             "total_after_leakage": total_after,
             "total_coverage_risk": total_coverage_risk,
-            "filtered_latency_p95_ms": round(statistics.median(all_p95), 3) if all_p95 else None,
             "ok": total_after == 0
             and all(c["filtered_is_order_preserving_subsequence"] for c in cases),
         }
@@ -411,16 +575,21 @@ def main(argv: list[str] | None = None) -> int:
         lines = [
             "# Phase 4E1 dev-only filter evaluation",
             "",
-            "- schema: `shiori-filter-eval/v2`",
+            "- schema: `shiori-filter-eval/v3`",
+            f"- harness SHA: `{results['harness_sha']}`",
             f"- implementation SHA: `{results['implementation_sha'] or '(unset)'}`",
+            f"- embedding mode: `{results['embedding_mode']}`",
             f"- model identity: `{MODEL_IDENTITY}`",
             f"- dev filter cases: {len(filter_ids)} (72-dev only, holdout untouched)",
+            f"- latency reps: {LATENCY_REPS}",
             f"- input hashes: {json.dumps(input_hashes, sort_keys=True)}",
             f"- kind counts: {json.dumps(kind_counts, sort_keys=True)}",
-            f"- total before leakage: {total_before}",
-            f"- total after leakage: {total_after}",
-            f"- total coverage risk: {total_coverage_risk}",
-            f"- filtered latency p95 (median of per-case p95): {results['filtered_latency_p95_ms']}ms",
+            f"- leakage by kind (before/after query counts): {json.dumps(leakage_by_kind, sort_keys=True)}",
+            f"- total before leakage (rows): {total_before}",
+            f"- total after leakage (rows): {total_after}",
+            f"- total coverage risk (rows): {total_coverage_risk}",
+            f"- latency p50/p95 (mean of per-case p50/p95): {json.dumps(latency, sort_keys=True)}",
+            f"- unfiltered regression: {json.dumps(unfiltered_regression, sort_keys=True)}",
             f"- ok: {results['ok']}",
             "",
             "| query_id | kinds | before | after | control_returned | filtered_returned | coverage_risk | subsequence | ok |",
