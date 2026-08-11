@@ -429,7 +429,7 @@ P4E3_MEASUREMENT_LINEAGE = {
 }
 
 
-def test_phase4e3_manifest_and_report_closure():
+def test_phase4e3_manifest_and_report_closure(tmp_path):
     """Genuine-red closure for the Phase 4E3 manifest + report.
 
     Neither the formal manifest nor the report is committed yet, so this node
@@ -444,6 +444,7 @@ def test_phase4e3_manifest_and_report_closure():
     manifest = json.loads(P4E3_MANIFEST.read_text(encoding="utf-8"))
     results = json.loads(P4E3_RESULTS.read_text(encoding="utf-8"))
     report = P4E3_REPORT.read_text(encoding="utf-8")
+    p4e2 = json.loads(P4E2_MANIFEST.read_text(encoding="utf-8"))
 
     # Frozen manifest contract.
     assert manifest["base_sha"] == "3040125e2fd93b4b270cefdde03d30cc3bfb637f"
@@ -460,42 +461,41 @@ def test_phase4e3_manifest_and_report_closure():
     assert set(manifest["dev_set"]["query_ids"]) == dev
     assert set(manifest["dev_set"]["query_ids"]).isdisjoint(holdout)
 
-    # Existing model/runner/schema/adapters identity is preserved.
-    assert manifest["model"]["identity"] == "voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f"
-    assert manifest["runner"]["name"] == "benchmark.product_eval.runner"
-    assert manifest["postprocess"]["name"] == "benchmark.product_eval.postprocess"
-    assert manifest["report_generator"]["name"] == "benchmark.product_eval.build_report"
-    assert manifest["schema"]["dataset_manifest_schema"] == "1"
-    assert "adapters_not_run" in manifest
+    # model/runner/postprocess/report_generator/schema/adapters_not_run equal
+    # the committed Phase 4E2 objects exactly (only lineage/title/notes/base/
+    # result/report fields may differ in the P4E3 manifest).
+    for key in ("model", "runner", "postprocess", "report_generator", "schema", "adapters_not_run"):
+        assert manifest[key] == p4e2[key], f"manifest identity drift: {key}"
 
-    # Byte-equal report regeneration via the public CLI seam.
-    out_report = Path(".") / f"phase4e3_report_regen_{hashlib.sha256(report.encode()).hexdigest()[:12]}.md"
-    try:
-        proc = subprocess.run(
-            [
-                sys.executable, "-m", "benchmark.product_eval.build_report",
-                "--results", str(P4E3_RESULTS),
-                "--manifest", str(P4E3_MANIFEST),
-                "--out", str(out_report),
-            ],
-            capture_output=True,
-            text=True,
-            cwd=REPO,
-        )
-        assert proc.returncode == 0, proc.stderr
-        assert out_report.read_text(encoding="utf-8") == report
-    finally:
-        if out_report.exists():
-            out_report.unlink()
+    # Byte-equal report regeneration via the public CLI seam into tmp_path.
+    out_report = tmp_path / "phase4e3_72_report.md"
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "benchmark.product_eval.build_report",
+            "--results", str(P4E3_RESULTS),
+            "--manifest", str(P4E3_MANIFEST),
+            "--out", str(out_report),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert out_report.read_text(encoding="utf-8") == report
 
-    # The three formal deliverables contain no content, keys, DSNs, or host
-    # paths; manifest/report contain no holdout ids.
+    # The three formal deliverables contain no secrets, paths, or content
+    # snippets; manifest/report contain no holdout ids.
+    forbidden = [
+        r"/Users/", r"/home/", r"/root/", r"sk-live", r"AKIA", r"PRIVATE KEY",
+        r"gh[pousr]_", r"@example", r"postgresql://", r"PGPASSWORD", r"SHIORI_DATABASE_DSN",
+        r"benchmark/\.generated",
+    ]
     for payload, label in ((results, "results"), (manifest, "manifest"), (report, "report")):
         text = payload if isinstance(payload, str) else json.dumps(payload)
-        assert "postgresql://" not in text
-        assert "voyage_key" not in text
-        assert "AKIA" not in text
-        assert "/Users/" not in text and "benchmark/.generated" not in text
+        for pat in forbidden:
+            assert not re.search(pat, text), f"forbidden pattern {pat} in {label}"
+        for snippet in ("A database migration added", "构建流水线", "Only verified production releases"):
+            assert snippet not in text, f"content snippet leaked into {label}"
     for qid in holdout:
         assert qid not in json.dumps(manifest)
         assert qid not in report
