@@ -67,3 +67,18 @@ def test_dedup_keeps_distinct_content_in_same_session(replay_query, db):
     # Human-spec literal order: current fact (B) before historical fact (A).
     # Both must be present even though cosine(A, B) > 0.85.
     assert mine == [(B, session_id), (A, session_id)]
+
+
+def test_dedup_collapses_exact_duplicate_in_same_provenance(replay_query, db):
+    conn, prefix = db
+    session_id = prefix + "-exact-dup"
+    now = datetime.now(UTC)
+    # Two byte-identical A rows: same session_id, source_type, embedding, and
+    # time semantics.  True duplication must still collapse to one.
+    _insert(conn, session_id, A, replay_query.embed(A, input_type="document"), now)
+    _insert(conn, session_id, A, replay_query.embed(A, input_type="document"), now)
+
+    results = query.search(QUERY, limit=20)
+    mine = [(row[0], row[3]) for row in results if row[3] == session_id]
+
+    assert mine == [(A, session_id)]
