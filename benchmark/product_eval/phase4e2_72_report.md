@@ -1,4 +1,4 @@
-# Shiori Phase 4D Baseline Report (72 development queries)
+Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)
 
 _Measurement-only. No acceptance thresholds. Holdout (48) untouched. Public datasets not run._
 
@@ -102,15 +102,7 @@ _Measurement-only. No acceptance thresholds. Holdout (48) untouched. Public data
 
 ## Known gaps
 
-- Production query.search() does not apply source/session/time filters; all dense-based configs show filter leakage (source=9, session=9, time=3 per config).
-- +temporal degrades the temporal and filter buckets (decay lifts non-target docs); +dedup drops relevant docs (coverage risk).
-- no_evidence returns false positives in the dense path (no abstention mechanism); lexical-only abstains by absence of candidates.
-
----
-
-## Phase 4E2 intent-gated decay caveats (author-confirmed, measurement-only)
-
-- **q-0057 (`latest` temporal intent)**: the frozen 30-day decay boosts grade-2 `doc-0012` to rank 1 but pushes grade-3 `doc-0011` from rank 3 to rank 12, so this query's Recall@5 is 1/2.  This confirms the intent gate fires correctly; it also documents that the frozen unconditional 30-day formula can still out-rank semantic relevance on a composite `latest` query.  No formula adjustment is made (out of scope).
-- **q-0086 (no intent, ordinary query)**: once decay is disabled for ordinary queries, grade-2 `doc-0021` moves from rank 3 to rank 4 and non-relevant `doc-0019` to rank 3, deterministically lowering the duplicate bucket nDCG@10 from 1.0 to 0.997316.  This is a real, deterministic minor regression (not tie/noise), honestly recorded.
-- **Filter leakage `9/9/3` is an unfiltered counterfactual**: the postprocess `source/session/time` counts are computed by overlaying the authored ledger on UNFILTERED runner traces.  They are NOT a Phase 4E1 active-filter leakage regression, which remains `0/0/0` (plus this task's public filter tests).
+- q-0057: grade-3 doc-0011 drops from rank 3 to rank 12 with Recall@5=1/2 while grade-2 doc-0012 reaches rank 1; frozen decay formula risk on a composite latest query.
+- q-0086: grade-2 doc-0021 moves from rank 3 to rank 4 and duplicate nDCG@10 drops 1.0 -> 0.997316; a deterministic minor regression, not tie/noise.
+- source/session/time 9/9/3 is an unfiltered counterfactual trace metric, not a Phase 4E1 active-filter regression; active filters remain 0/0/0.
 

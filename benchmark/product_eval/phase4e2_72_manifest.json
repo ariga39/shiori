@@ -133,11 +133,17 @@
     "name": "benchmark.product_eval.postprocess",
     "version": "1"
   },
-  "report_file_sha256": "68775c70534aedb3fec9d1ec98e6c84e246b8d628a911dd6259e64ebe8f12b62",
+  "report_file_sha256": "d20f4da7291ea811e3978b5e752501b9ae53ec3af26df1a3d36f7062d7fb9806",
   "report_generator": {
     "name": "benchmark.product_eval.build_report",
     "version": "1"
   },
+  "report_notes": [
+    "q-0057: grade-3 doc-0011 drops from rank 3 to rank 12 with Recall@5=1/2 while grade-2 doc-0012 reaches rank 1; frozen decay formula risk on a composite latest query.",
+    "q-0086: grade-2 doc-0021 moves from rank 3 to rank 4 and duplicate nDCG@10 drops 1.0 -> 0.997316; a deterministic minor regression, not tie/noise.",
+    "source/session/time 9/9/3 is an unfiltered counterfactual trace metric, not a Phase 4E1 active-filter regression; active filters remain 0/0/0."
+  ],
+  "report_title": "Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)",
   "result_file_sha256": "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e",
   "runner": {
     "configs": [

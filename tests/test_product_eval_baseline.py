@@ -18,6 +18,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -204,13 +206,6 @@ P4E2_RESULTS = PRODUCT_EVAL / "phase4e2_72_results.json"
 P4E2_MANIFEST = PRODUCT_EVAL / "phase4e2_72_manifest.json"
 P4E2_REPORT = PRODUCT_EVAL / "phase4e2_72_report.md"
 P4E2_RESULTS_SHA = "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e"
-P4E2_CAVEATS_BLOCK = """---
-
-## Phase 4E2 intent-gated decay caveats (author-confirmed, measurement-only)
-
-- **q-0057 (`latest` temporal intent)**: the frozen 30-day decay boosts grade-2 `doc-0012` to rank 1 but pushes grade-3 `doc-0011` from rank 3 to rank 12, so this query's Recall@5 is 1/2.  This confirms the intent gate fires correctly; it also documents that the frozen unconditional 30-day formula can still out-rank semantic relevance on a composite `latest` query.  No formula adjustment is made (out of scope).
-- **q-0086 (no intent, ordinary query)**: once decay is disabled for ordinary queries, grade-2 `doc-0021` moves from rank 3 to rank 4 and non-relevant `doc-0019` to rank 3, deterministically lowering the duplicate bucket nDCG@10 from 1.0 to 0.997316.  This is a real, deterministic minor regression (not tie/noise), honestly recorded.
-- **Filter leakage `9/9/3` is an unfiltered counterfactual**: the postprocess `source/session/time` counts are computed by overlaying the authored ledger on UNFILTERED runner traces.  They are NOT a Phase 4E1 active-filter leakage regression, which remains `0/0/0` (plus this task's public filter tests)."""
 
 
 def test_phase4e2_results_sha_and_ids():
@@ -237,16 +232,13 @@ def test_phase4e2_manifest_closure():
     assert m["dev_set"]["query_count"] == 72
     # Pinned 72-dev vectors match the frozen Phase 4D pin.
     assert m["local_run_inputs"]["dev_query_vectors.json"]["sha256"] == "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2"
-    # Report byte-equals the unchanged generator output (offline closure),
-    # followed by the committed Phase 4E2 author-confirmed caveats block.
+    # Report byte-equals the manifest-driven generator output (full offline
+    # byte-equality closure).  The committed report must regenerate exactly.
     from benchmark.product_eval.build_report import _generate
 
     results = json.loads(P4E2_RESULTS.read_text(encoding="utf-8"))
     generated = _generate(results, m)
-    report_text = P4E2_REPORT.read_text(encoding="utf-8")
-    assert report_text.startswith(generated), "generated report body drifted"
-    assert P4E2_CAVEATS_BLOCK in report_text, "Phase 4E2 caveats block missing"
-    assert report_text.strip().endswith(P4E2_CAVEATS_BLOCK), "caveats block must be the report tail"
+    assert generated == P4E2_REPORT.read_text(encoding="utf-8")
 
 
 def test_phase4e2_report_derives_from_results():
@@ -258,3 +250,54 @@ def test_phase4e2_report_derives_from_results():
         assert cfg in report
     assert "72 development queries" in report
     assert "Holdout (48) untouched" in report
+
+
+# ── Phase 4E2 manifest-driven report metadata (genuine red, task #29) ────────
+
+
+P4E2_REPORT_TITLE = "Shiori Phase 4E2 Intent-Gated Temporal Decay Report (72 development queries)"
+P4E2_REPORT_NOTES = [
+    # Frozen literals for the report_notes contract.
+    "q-0057: grade-3 doc-0011 drops from rank 3 to rank 12 with Recall@5=1/2 while grade-2 doc-0012 reaches rank 1; frozen decay formula risk on a composite latest query.",
+    "q-0086: grade-2 doc-0021 moves from rank 3 to rank 4 and duplicate nDCG@10 drops 1.0 -> 0.997316; a deterministic minor regression, not tie/noise.",
+    "source/session/time 9/9/3 is an unfiltered counterfactual trace metric, not a Phase 4E1 active-filter regression; active filters remain 0/0/0.",
+]
+
+
+def test_build_report_cli_honors_phase4e2_title_and_notes(tmp_path):
+    """Genuine red: the public `build_report` CLI must honor manifest-level
+    `report_title`/`report_notes` (Phase 4E2 title + the three frozen notes) and
+    drop the two stale Known-gaps claims.  The current builder hardcodes the
+    Phase 4D baseline title and ignores the optional fields, so this must fail."""
+
+    if not P4E2_MANIFEST.exists() or not P4E2_RESULTS.exists():
+        pytest.skip("phase4e2 deliverables not committed")
+    manifest = json.loads(P4E2_MANIFEST.read_text(encoding="utf-8"))
+    manifest["report_title"] = P4E2_REPORT_TITLE
+    manifest["report_notes"] = P4E2_REPORT_NOTES
+    tmp_manifest = tmp_path / "manifest.json"
+    tmp_manifest.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    out_report = tmp_path / "report.md"
+
+    proc = subprocess.run(
+        [
+            sys.executable, "-m", "benchmark.product_eval.build_report",
+            "--results", str(P4E2_RESULTS),
+            "--manifest", str(tmp_manifest),
+            "--out", str(out_report),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+    )
+    assert proc.returncode == 0, proc.stderr
+    text = out_report.read_text(encoding="utf-8")
+
+    # Phase 4E2 title is honored.
+    assert P4E2_REPORT_TITLE in text
+    # Every frozen note appears verbatim.
+    for note in P4E2_REPORT_NOTES:
+        assert note in text
+    # The two stale/incorrect Known-gaps claims are gone.
+    assert "does not apply source/session/time filters" not in text
+    assert "+temporal degrades the temporal and filter buckets" not in text
