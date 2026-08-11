@@ -35,6 +35,10 @@ done
 : "${POSTGRES_PASSWORD:?missing POSTGRES_PASSWORD}"
 : "${SHIORI_PG_PORT:?missing SHIORI_PG_PORT}"
 
+# Polling budget (seconds) for each readiness gate. The restart gate must stay
+# fail-closed: it never gives up before this budget is exhausted.
+smoke_attempts="${SHIORI_SMOKE_MAX_ATTEMPTS:-60}"
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 compose_file="${repo_root}/deploy/docker-compose.yml"
 image_ref="shiori-pgvector:local"
@@ -123,7 +127,7 @@ command="$(docker inspect --format '{{json .Config.Cmd}}' "${container_id}")"
 }
 
 ready=false
-for _ in {1..60}; do
+for ((attempt = 1; attempt <= smoke_attempts; attempt++)); do
   if "${compose[@]}" exec --no-TTY session-memory-pg \
     pg_isready --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" >/dev/null 2>&1; then
     ready=true
@@ -144,7 +148,7 @@ uid="$("${compose[@]}" exec --no-TTY session-memory-pg id -u | tr -d '\r\n')"
 
 psql_exec() {
   "${compose[@]}" exec --no-TTY --env PGPASSWORD="${POSTGRES_PASSWORD}" \
-    session-memory-pg psql --no-psqlrc --set ON_ERROR_STOP=1 \
+    session-memory-pg psql --no-psqlrc --quiet --set ON_ERROR_STOP=1 \
     --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" "$@"
 }
 
@@ -161,28 +165,61 @@ count="$(psql_exec --tuples-only --no-align --command 'SELECT count(*) FROM shio
   exit 1
 }
 
+# Record the pre-restart postmaster identity BEFORE restarting: after restart
+# the gate only opens once this identity has changed AND a real write probe has
+# stabilized on the new generation.
+old_generation="$(psql_exec --tuples-only --no-align --command 'SELECT pg_postmaster_start_time()::text;')"
+[[ -n "${old_generation}" ]] || {
+  echo "could not read pre-restart postmaster generation" >&2
+  exit 1
+}
+
 "${compose[@]}" restart session-memory-pg >/dev/null
 # Restart readiness must not trust `pg_isready` alone: pg_isready can report
-# success while the old postmaster is still shutting down, and the very next
-# psql then fails with `database system is shutting down`. Wait for the NEW
-# postmaster generation to be stably readable AND writable: a transactional
-# probe must succeed twice consecutively (fail-closed with a hard timeout).
+# success while the old postmaster is still shutting down. The gate only opens
+# once a NEW postmaster generation is durably read/write:
+#   1. The pre-restart postmaster identity (pg_postmaster_start_time) above.
+#   2. After restart, a real write probe (temp-table INSERT inside a
+#      transaction, no product side effects) must succeed AND the identity must
+#      differ from the pre-restart one. A write probe that still succeeds on
+#      the OLD generation must NOT advance the gate.
+#   3. Two such successes must land on separate polling iterations (each is at
+#      least one poll interval apart), confirming the new generation is stable.
+#   4. The gate is fail-closed under a hard attempt budget.
+probe_sql="CREATE TEMP TABLE shiori_restart_probe (id integer PRIMARY KEY, payload text); INSERT INTO shiori_restart_probe VALUES (1, 'ok'); SELECT count(*) FROM shiori_restart_probe; SELECT pg_postmaster_start_time()::text;"
+
 ready=false
-for _ in {1..60}; do
-  if "${compose[@]}" exec --no-TTY --env PGPASSWORD="${POSTGRES_PASSWORD}" \
-      session-memory-pg psql --no-psqlrc --set ON_ERROR_STOP=1 \
-      --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" \
-      --command 'BEGIN; SELECT 1; COMMIT;' >/dev/null 2>&1; then
-    # One success can still be a shutting-down old postmaster's last breath;
-    # require a second consecutive success to confirm the new generation is
-    # durably accepting reads and writes.
-    if "${compose[@]}" exec --no-TTY --env PGPASSWORD="${POSTGRES_PASSWORD}" \
-        session-memory-pg psql --no-psqlrc --set ON_ERROR_STOP=1 \
-        --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" \
-        --command 'BEGIN; SELECT 1; COMMIT;' >/dev/null 2>&1; then
-      ready=true
-      break
+stable_generation=""
+stable_successes=0
+for ((attempt = 1; attempt <= smoke_attempts; attempt++)); do
+  probe_output=""
+  if probe_output="$(psql_exec --tuples-only --no-align --command "${probe_sql}" 2>/dev/null)"; then
+    write_ok="$(printf '%s\n' "${probe_output}" | sed -n '1p' | tr -d '\r\n')"
+    generation="$(printf '%s\n' "${probe_output}" | sed -n '2p' | tr -d '\r\n')"
+  else
+    write_ok=""
+    generation=""
+  fi
+  if [[ "${write_ok}" == 1 && -n "${generation}" && "${generation}" != "${old_generation}" ]]; then
+    if [[ "${stable_successes}" == 0 ]]; then
+      stable_generation="${generation}"
+      stable_successes=1
+    elif [[ "${generation}" == "${stable_generation}" ]]; then
+      stable_successes=$((stable_successes + 1))
+      if (( stable_successes >= 2 )); then
+        ready=true
+        break
+      fi
+    else
+      # The generation changed again mid-window; restart stabilization is still
+      # ongoing, so restart the consecutive-success count on the new identity.
+      stable_generation="${generation}"
+      stable_successes=1
     fi
+  else
+    # Old-generation success, probe failure, or empty identity: never advance.
+    stable_generation=""
+    stable_successes=0
   fi
   sleep 1
 done

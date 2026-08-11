@@ -59,26 +59,57 @@ if [[ "${1:-}" == compose ]]; then
         printf '%s\\n' '1'
         exit 0
       fi
-      # Restart-readiness probe: a "shutting down" postmaster rejects new
-      # connections. When FAKE_RESTART_SQL_SHUTDOWN=1 AND restart has happened,
-      # the FIRST readiness psql attempts fail (old postmaster), then later
-      # attempts succeed (new postmaster), proving the script waits for a stable
-      # read/write postmaster instead of passing on a stale pg_isready.
-      if [[ "${FAKE_RESTART_SQL_SHUTDOWN:-0}" == 1 && -f "${state}/restart-called" ]]; then
-        if [[ "${FAKE_RESTART_SQL_SHUTDOWN_FOREVER:-0}" == 1 ]]; then
-          echo "FATAL: database system is shutting down" >&2
-          exit 1
+      # Restart read/write probe (CREATE TEMP TABLE + INSERT + count + identity).
+      # One probe returns two lines: write result, then postmaster generation.
+      if [[ "${args}" == *"CREATE TEMP TABLE"* ]]; then
+        if [[ -f "${state}/restart-called" ]]; then
+          count=0
+          if [[ -f "${state}/probes" ]]; then
+            count="$(cat "${state}/probes")"
+          fi
+          count=$((count + 1))
+          printf '%s' "${count}" > "${state}/probes"
+          # FAKE_RESTART_SQL_SHUTDOWN: the old postmaster rejects new
+          # connections (shutting down) for the first two probes, then the new
+          # generation accepts them. FAKE_RESTART_SQL_SHUTDOWN_FOREVER keeps
+          # rejecting forever.
+          if [[ "${FAKE_RESTART_SQL_SHUTDOWN:-0}" == 1 ]]; then
+            if [[ "${FAKE_RESTART_SQL_SHUTDOWN_FOREVER:-0}" == 1 ]]; then
+              echo "FATAL: database system is shutting down" >&2
+              exit 1
+            fi
+            if (( count <= 2 )); then
+              echo "FATAL: database system is shutting down" >&2
+              exit 1
+            fi
+          fi
+          # FAKE_RESTART_OLD_GEN: the OLD generation keeps accepting writes
+          # (write probe succeeds) for the first two probes; the gate must NOT
+          # pass until the generation identity differs.
+          if [[ "${FAKE_RESTART_OLD_GEN:-0}" == 1 ]] && (( count <= 2 )); then
+            printf '%s\\n' '1'
+            printf '%s\\n' "${FAKE_OLD_GEN:-gen-a}"
+            exit 0
+          fi
+          # FAKE_RESTART_WRITE_FAIL_FOREVER: the generation changed but the
+          # write probe never succeeds.
+          if [[ "${FAKE_RESTART_WRITE_FAIL_FOREVER:-0}" == 1 ]]; then
+            echo "ERROR: cannot execute INSERT in a read-only transaction" >&2
+            exit 1
+          fi
         fi
-        count=0
-        if [[ -f "${state}/sql-after-restart" ]]; then
-          count="$(cat "${state}/sql-after-restart")"
+        printf '%s\\n' '1'
+        printf '%s\\n' "${FAKE_NEW_GEN:-gen-b}"
+        exit 0
+      fi
+      # Pre-restart postmaster generation identity read.
+      if [[ "${args}" == *"pg_postmaster_start_time"* ]]; then
+        if [[ -f "${state}/restart-called" ]]; then
+          printf '%s\\n' "${FAKE_NEW_GEN:-gen-b}"
+        else
+          printf '%s\\n' "${FAKE_OLD_GEN:-gen-a}"
         fi
-        count=$((count + 1))
-        printf '%s' "${count}" > "${state}/sql-after-restart"
-        if (( count <= 2 )); then
-          echo "FATAL: database system is shutting down" >&2
-          exit 1
-        fi
+        exit 0
       fi
       exit 0
       ;;
@@ -215,24 +246,60 @@ def test_up_failure_cleans_resources_after_ownership_gate(tmp_path: Path) -> Non
 
 def test_restart_readiness_waits_for_stable_sql_probe(tmp_path: Path) -> None:
     """pg_isready can succeed while the old postmaster is still shutting down.
-    With FAKE_RESTART_SQL_SHUTDOWN=1, the first two post-restart psql probes
+    With FAKE_RESTART_SQL_SHUTDOWN=1, the first two post-restart write probes
     fail (simulating 'database system is shutting down'); the script must wait
-    until a later probe succeeds (the new postmaster) instead of passing on the
-    stale pg_isready signal."""
-    result, state = _run(tmp_path, FAKE_RESTART_SQL_SHUTDOWN="1")
+    until the NEW generation accepts a real write probe instead of passing on
+    the stale pg_isready signal."""
+    result, state = _run(tmp_path, FAKE_RESTART_SQL_SHUTDOWN="1", SHIORI_SMOKE_MAX_ATTEMPTS="5")
 
     assert result.returncode == 0, result.stderr
     assert (state / "restart-called").exists()
-    # The script must have retried the transactional probe past the simulated
-    # shutting-down window (>= 3 attempts: 2 failures + the stable success).
-    attempts = int((state / "sql-after-restart").read_text(encoding="utf-8"))
-    assert attempts >= 3
+    # The script must have retried the write probe past the simulated
+    # shutting-down window (>= 3 probes: 2 failures + the stable new-generation
+    # successes).
+    probes = int((state / "probes").read_text(encoding="utf-8"))
+    assert probes >= 3
 
 
 def test_restart_readiness_fails_closed_if_sql_never_stabilizes(tmp_path: Path) -> None:
-    """If the post-restart SQL probe never stabilizes (shutting down persists),
+    """If the post-restart write probe never stabilizes (shutting down persists),
     the script must fail closed rather than pass."""
-    result, state = _run(tmp_path, FAKE_RESTART_SQL_SHUTDOWN="1", FAKE_RESTART_SQL_SHUTDOWN_FOREVER="1")
+    result, state = _run(
+        tmp_path,
+        FAKE_RESTART_SQL_SHUTDOWN="1",
+        FAKE_RESTART_SQL_SHUTDOWN_FOREVER="1",
+        SHIORI_SMOKE_MAX_ATTEMPTS="5",
+    )
 
     assert result.returncode != 0
     assert "did not become read/write ready after restart" in result.stderr
+    assert int((state / "probes").read_text(encoding="utf-8")) == 5
+
+
+def test_old_generation_success_does_not_advance_readiness(tmp_path: Path) -> None:
+    """A write probe that SUCCEEDS on the OLD postmaster generation must never
+    advance the gate: only a probe on a NEW generation (identity changed)
+    counts, so even consecutive old-generation write successes are ignored."""
+    result, state = _run(tmp_path, FAKE_RESTART_OLD_GEN="1", SHIORI_SMOKE_MAX_ATTEMPTS="5")
+
+    assert result.returncode == 0, result.stderr
+    # Probes 1-2 succeeded as writes but reported the OLD generation; the gate
+    # must not have passed on them. It only opened after the identity changed
+    # and stayed stable across the poll interval (>= 3 probes).
+    probes = int((state / "probes").read_text(encoding="utf-8"))
+    assert probes >= 3
+
+
+def test_new_generation_write_probe_failure_fails_closed(tmp_path: Path) -> None:
+    """If the generation changes but the real write probe persistently fails,
+    the script must fail closed instead of passing on the identity alone."""
+    result, state = _run(
+        tmp_path,
+        FAKE_RESTART_WRITE_FAIL_FOREVER="1",
+        SHIORI_SMOKE_MAX_ATTEMPTS="5",
+    )
+
+    assert result.returncode != 0
+    assert "did not become read/write ready after restart" in result.stderr
+    # Every polling attempt issued a probe; all failed to pass the gate.
+    assert int((state / "probes").read_text(encoding="utf-8")) == 5
