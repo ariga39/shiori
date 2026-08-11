@@ -69,15 +69,13 @@ def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db
     assert wheels, "uv build produced no wheel"
     wheel = max(wheels, key=lambda p: p.stat().st_size)
 
-    # Clean venv + the wheel with its deps resolved from the local uv cache
-    # (fully offline; no network/model/API key).  The wheel itself is installed
-    # with --no-deps; the runtime deps are installed --offline so the installed
-    # query/mcp_server modules import cleanly.
+    # Clean venv + the wheel (deps resolved by uv from the wheel metadata).
+    # No model/network embedding calls are made; only package resolution uses
+    # the uv index/cache.
     venv = tmp_path / "venv"
     _run(uv, "venv", "--python", str(sys.executable), str(venv))
     py = venv / "bin" / "python"
-    _run(uv, "pip", "install", "--python", str(py), "--no-deps", str(wheel))
-    _run(uv, "pip", "install", "--python", str(py), "--offline", "numpy", "psycopg2-binary", "mcp", "requests")
+    _run(uv, "pip", "install", "--python", str(py), str(wheel))
 
     # Verify the installed modules resolve from the wheel site-packages, not
     # the source tree (run from an unrelated cwd so sys.path[0] is neutral).
