@@ -10,6 +10,7 @@ the read-only MCP `search` tool.  No task #10 harness/fixtures or
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -51,6 +52,17 @@ def _run(*args: str, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, check=True, **kwargs)
 
 
+def _parent_site_packages() -> str:
+    """The running interpreter's site-packages, used only to bridge runtime
+    deps (numpy/psycopg2/mcp) into the child wheel venv.  query.py/mcp_server.py
+    are NOT physically present there (only via the parent's editable .pth,
+    which a plain PYTHONPATH dir does not execute), so they resolve from the
+    wheel."""
+    import site
+
+    return site.getsitepackages()[0]
+
+
 def _seed_db(conn, sid: str) -> None:
     now = datetime.now(UTC)
     old = now - timedelta(days=120)
@@ -61,7 +73,13 @@ def _seed_db(conn, sid: str) -> None:
 def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db):
     """The installed wheel's CLI `query` and MCP `search` must reproduce the
     intent-gated ordering (ordinary: old-first; `latest`/structured-bounds:
-    new-first) and load from the wheel, not the source tree."""
+    new-first) and load from the wheel, not the source tree.
+
+    The local wheel is installed --no-deps with UV_OFFLINE/PIP_NO_INDEX set
+    (no index access).  Runtime deps are bridged from the running interpreter's
+    site-packages via a controlled PYTHONPATH (never repo root/cwd; the parent's
+    editable .pth is not processed from a plain PYTHONPATH dir), so
+    query.py/mcp_server.py load from the child wheel site-packages."""
     dist = tmp_path / "dist"
     dist.mkdir()
     _run(uv, "build", "--out-dir", str(dist), str(ROOT), cwd=ROOT)
@@ -69,20 +87,37 @@ def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db
     assert wheels, "uv build produced no wheel"
     wheel = max(wheels, key=lambda p: p.stat().st_size)
 
-    # Clean venv + the wheel (deps resolved by uv from the wheel metadata).
-    # No model/network embedding calls are made; only package resolution uses
-    # the uv index/cache.
+    # Clean venv + the wheel --no-deps under a hard offline/no-index gate.
     venv = tmp_path / "venv"
     _run(uv, "venv", "--python", str(sys.executable), str(venv))
     py = venv / "bin" / "python"
-    _run(uv, "pip", "install", "--python", str(py), str(wheel))
+    install_env = {"UV_OFFLINE": "1", "PIP_NO_INDEX": "1"}
+    _run(uv, "pip", "install", "--python", str(py), "--no-deps", str(wheel), env=install_env)
+
+    # Offline gate evidence: a second offline install attempt must succeed only
+    # from cache/index-free resolution (the wheel is already present).
+    _run(uv, "pip", "install", "--python", str(py), "--no-deps", str(wheel), env=install_env)
 
     # Verify the installed modules resolve from the wheel site-packages, not
     # the source tree (run from an unrelated cwd so sys.path[0] is neutral).
-    out = _run(str(py), "-c", "import query, mcp_server; print(query.__file__); print(mcp_server.__file__)", cwd=tmp_path)
-    query_path, mcp_path = out.stdout.strip().splitlines()
+    # PYTHONPATH bridges runtime deps from the parent interpreter.
+    bridge_env = dict(os.environ)
+    bridge_env["PYTHONPATH"] = _parent_site_packages()
+    out = _run(
+        str(py),
+        "-c",
+        "import query, mcp_server, numpy, psycopg2; print(query.__file__); print(mcp_server.__file__); print(numpy.__file__)",
+        cwd=tmp_path,
+        env=bridge_env,
+    )
+    lines = out.stdout.strip().splitlines()
+    assert len(lines) == 3, f"expected 3 path lines, got {lines}"
+    query_path, mcp_path, numpy_path = lines
     assert str(venv / "lib") in query_path, f"query loaded from source: {query_path}"
     assert str(venv / "lib") in mcp_path, f"mcp_server loaded from source: {mcp_path}"
+    # numpy resolves from the parent interpreter site-packages (the bridge), not
+    # from the wheel (which was installed --no-deps).
+    assert _parent_site_packages() in numpy_path
 
     # Seed the isolated test DB with the two rows under the guarded fixture.
     conn, prefix = db
@@ -109,7 +144,7 @@ def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db
     # Ordinary query: no decay -> old relevant first.
     ordinary = _run(
         str(cli), "--config", str(config), "query", QUERY_TEXT, "-n", "20",
-        "--session-id", sid, cwd=tmp_path,
+        "--session-id", sid, cwd=tmp_path, env=bridge_env,
     )
     assert ordinary.returncode == 0
     old_pos = ordinary.stdout.find(OLD_CONTENT)
@@ -120,7 +155,7 @@ def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db
     # `latest`: decay applies -> new weak first.
     latest = _run(
         str(cli), "--config", str(config), "query", LATEST_QUERY_TEXT, "-n", "20",
-        "--session-id", sid, cwd=tmp_path,
+        "--session-id", sid, cwd=tmp_path, env=bridge_env,
     )
     old_pos = latest.stdout.find(OLD_CONTENT)
     new_pos = latest.stdout.find(NEW_CONTENT)
@@ -138,6 +173,7 @@ def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db
         "--session-id", sid,
         "--time-from", (datetime.now(UTC) - timedelta(days=121)).isoformat(),
         cwd=tmp_path,
+        env=bridge_env,
     )
     old_pos = time_filtered.stdout.find(OLD_CONTENT)
     new_pos = time_filtered.stdout.find(NEW_CONTENT)
@@ -148,7 +184,8 @@ def test_installed_wheel_cli_and_mcp_intent_ordering(uv: str, tmp_path: Path, db
     # tool; ordinary/`latest`/structured-time ordering, filters_applied, and
     # provenance must be consistent with the CLI/real-PG.
     mcp_script = _run(
-        str(py), "-c", _MCP_PROBE, str(cli), str(config), sid, cwd=tmp_path,
+        str(py), "-c", _MCP_PROBE, str(cli), str(config), sid,
+        cwd=tmp_path, env=bridge_env,
     )
     assert mcp_script.returncode == 0, f"MCP probe failed:\n{mcp_script.stderr}"
     assert "MCP_ORDINARY_OK" in mcp_script.stdout
