@@ -1,0 +1,44 @@
+{
+  "corpus": {
+    "count": 4,
+    "input_type": "document",
+    "sha256": "baa0f3e6ceb862eb22dbe215180d45a46a91fd4eb345769f0d1e0cf8fc094f1f",
+    "version": 1
+  },
+  "generator": {
+    "libraries": {
+      "sentence_transformers": "5.7.0",
+      "torch": "2.13.0",
+      "transformers": "4.56.2"
+    },
+    "library": "sentence-transformers",
+    "model": "voyageai/voyage-4-nano",
+    "model_revision": "67fabc9bef010dabc5f6024aa1b1b6b93410426f",
+    "name": "voyage-4-nano-offline",
+    "revision": "2026-08-11-2"
+  },
+  "model": {
+    "dimension": 1024,
+    "dtype": "float32",
+    "id": "voyageai/voyage-4-nano",
+    "key_identity": "86847a95cd3c1c99fd4089246fdaa98e59bbec187213bbb4c71ba1ea61696988",
+    "normalized": true,
+    "prompt_identity": {
+      "document": "encode_document",
+      "query": "encode_query"
+    },
+    "revision": "67fabc9bef010dabc5f6024aa1b1b6b93410426f"
+  },
+  "queries": {
+    "count": 6,
+    "input_type": "query",
+    "sha256": "e06b1ccba3d9e88a06914471ec8f56aeb7f04f71144e4dc8aa67cbda6a299558",
+    "version": 1
+  },
+  "schema": "shiori-replay-fixture/v1",
+  "vectors": {
+    "count": 10,
+    "key_format": "model_identity_fingerprint:input_type:sha256(text)",
+    "sha256": "ad439d6f35aa8320da1692fe8afcd3a030620a03178301331742baa1efc0508c"
+  }
+}

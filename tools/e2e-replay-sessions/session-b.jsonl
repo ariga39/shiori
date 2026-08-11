@@ -1,0 +1,4 @@
+{"type":"message","message":{"role":"user","content":"Schema updates are applied strictly forward and are never rewritten."},"timestamp":"2026-01-02T00:00:00Z"}
+{"type":"message","message":{"role":"assistant","content":"Hybrid retrieval combines dense vectors with BM25 keyword matching."},"timestamp":"2026-01-02T00:01:00Z"}
+{"type":"message","message":{"role":"user","content":"We agreed to pause publishing until the private release is verified."},"timestamp":"2026-01-02T00:02:00Z"}
+{"type":"message","message":{"role":"assistant","content":"The release remains private until all security gates pass."},"timestamp":"2026-01-02T00:03:00Z"}

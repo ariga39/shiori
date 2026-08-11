@@ -1,0 +1,4 @@
+{"type":"message","message":{"role":"user","content":"The Q3 2026 board meeting is scheduled for 2026-10-15 at the Tokyo office."},"timestamp":"2026-01-01T00:00:00Z"}
+{"type":"message","message":{"role":"assistant","content":"The database migration introduces forward-only versioned schema changes."},"timestamp":"2026-01-01T00:01:00Z"}
+{"type":"message","message":{"role":"user","content":"The search service ranks results using hybrid vector and full-text scoring."},"timestamp":"2026-01-01T00:02:00Z"}
+{"type":"message","message":{"role":"assistant","content":"The nightly export runs at 02:00 UTC and writes to the archive bucket."},"timestamp":"2026-01-01T00:03:00Z"}
