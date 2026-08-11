@@ -99,3 +99,24 @@ def test_dedup_keeps_identical_content_across_sessions(replay_query, db):
     mine = sorted((row[0], row[3]) for row in results if row[3] in (session_id_a, session_id_b))
 
     assert mine == sorted([(A, session_id_a), (A, session_id_b)])
+
+
+def test_dedup_keeps_identical_content_across_source_types(replay_query, db):
+    conn, prefix = db
+    session_id = prefix + "-src-types"
+    now = datetime.now(UTC)
+    # Byte-identical A in the same session with identical embedding and time
+    # semantics, but two distinct source_type literals.  Both must survive
+    # dedup because the source_type provenance differs.
+    _insert(conn, session_id, A, replay_query.embed(A, input_type="document"), now,
+            source_type="synthetic-note")
+    _insert(conn, session_id, A, replay_query.embed(A, input_type="document"), now,
+            source_type="synthetic-chat")
+
+    results = query.search(QUERY, limit=20)
+    mine = set((row[0], row[3], row[4]) for row in results if row[3] == session_id)
+
+    assert mine == {
+        (A, session_id, "synthetic-note"),
+        (A, session_id, "synthetic-chat"),
+    }
