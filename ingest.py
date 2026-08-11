@@ -93,6 +93,19 @@ def apply_settings(settings: Settings) -> None:
         VOYAGE_MODEL = settings.voyage_model
     if settings.replay_manifest is not None:
         REPLAY_MANIFEST = str(settings.replay_manifest)
+    if settings.embedding_provider == "replay" and settings.replay_manifest is not None:
+        # The replay provider's rows come from the fixture vectors, so the
+        # recorded embedding_model must be the fixture's true model identity
+        # (repo id + pinned revision), not the Voyage default.
+        from shiori.embedding_replay import ReplayError, replay_model_identity
+
+        try:
+            VOYAGE_MODEL = replay_model_identity(settings.replay_manifest)
+        except ReplayError:
+            raise ConfigError(
+                "replay embedding provider could not resolve the fixture model identity",
+                code="replay_model_identity_unavailable",
+            ) from None
     if settings.embed_dim is not None:
         EMBED_DIM = settings.embed_dim
     if settings.embedding_provider is not None:

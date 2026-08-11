@@ -259,6 +259,16 @@ class ReplayEmbedder:
     def manifest(self) -> ReplayManifest:
         return self._manifest
 
+    @property
+    def model_identity(self) -> str:
+        """The exact model identity recorded for durable rows.
+
+        Uses the repo id + pinned revision, e.g.
+        ``voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f``, so
+        rows written through the replay provider carry the true vector source.
+        """
+        return f"{self._manifest.model_id}@{self._manifest.model_revision}"
+
     def embed(self, text: str, *, input_type: str = "document") -> list[float]:
         if not isinstance(text, str):
             raise ReplayError("replay embedding input must be text", code="invalid_replay_input")
@@ -280,6 +290,17 @@ class ReplayEmbedder:
                 code="replay_dimension_mismatch",
             )
         return [float(value) for value in vector]
+
+
+def replay_model_identity(manifest_path: Path) -> str:
+    """Return ``repo_id@revision`` for a replay fixture without loading vectors.
+
+    Lets the ingest/query settings layer record the true vector source model in
+    ``session_chunks.embedding_model`` when the replay provider is active, so
+    the durable provenance never claims a different model than the vectors came
+    from.
+    """
+    return ReplayEmbedder.from_files(manifest_path, manifest_path.with_name("vectors.json")).model_identity
 
 
 def _validate_vectors(manifest: ReplayManifest, vectors: dict[str, Any]) -> dict[str, list[float]]:

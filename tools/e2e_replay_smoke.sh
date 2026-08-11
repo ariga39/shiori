@@ -137,6 +137,20 @@ if [[ "${chunk_count}" != "3" ]]; then
   echo "e2e replay: expected 3 chunks after initial ingest, got ${chunk_count}" >&2
   exit 1
 fi
+# Model provenance: rows written through the replay provider must carry the
+# fixture's true model identity (repo id + pinned revision), not a Voyage label.
+expected_model="$("${python_bin}" - "${manifest}" <<'PY'
+import json
+import sys
+m = json.load(open(sys.argv[1], encoding="utf-8"))
+print(f"{m['model']['id']}@{m['model']['revision']}")
+PY
+)"
+recorded_model="$(count "SELECT DISTINCT embedding_model FROM session_chunks;")"
+if [[ "${recorded_model}" != "${expected_model}" ]]; then
+  echo "e2e replay: recorded embedding_model '${recorded_model}' != manifest identity '${expected_model}'" >&2
+  exit 1
+fi
 
 # 3. query via CLI: the fixture query set is guaranteed to embed.
 run query "how are schema migrations applied?" --limit 3 >/dev/null

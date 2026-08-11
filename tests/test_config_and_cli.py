@@ -285,6 +285,33 @@ def test_replay_provider_accepts_existing_manifest(tmp_path: Path):
     assert settings.replay_manifest == manifest
 
 
+def test_replay_provider_records_fixture_model_identity(tmp_path: Path, monkeypatch):
+    """The replay provider must record the fixture's true model identity
+    (repo id + pinned revision) as the row's embedding_model, not a Voyage
+    default label (model-provenance contract)."""
+    import shutil
+
+    monkeypatch.setattr(ingest, "VOYAGE_MODEL", "voyage-4-large")
+    monkeypatch.setattr(query, "VOYAGE_MODEL", "voyage-4-large")
+    monkeypatch.setattr(ingest, "EMBEDDING_PROVIDER", "voyage")
+    monkeypatch.setattr(query, "EMBEDDING_PROVIDER", "voyage")
+    fixture_dir = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "replay"
+    manifest = tmp_path / "manifest.json"
+    shutil.copyfile(fixture_dir / "manifest.json", manifest)
+    shutil.copyfile(fixture_dir / "vectors.json", tmp_path / "vectors.json")
+    settings = load_config(
+        environ={
+            "SHIORI_EMBEDDING_PROVIDER": "replay",
+            "SHIORI_REPLAY_MANIFEST": str(manifest),
+            "SHIORI_EMBED_DIM": "1024",
+        }
+    )
+    ingest.apply_settings(settings)
+    query.apply_settings(settings)
+    assert ingest.VOYAGE_MODEL == "voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f"
+    assert query.VOYAGE_MODEL == "voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f"
+
+
 def test_embedding_dimension_matches_schema():
     settings = load_config(
         environ={

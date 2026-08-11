@@ -167,6 +167,20 @@ def apply_settings(settings: Settings) -> None:
         VOYAGE_API_KEY = settings.voyage_api_key
     if settings.replay_manifest is not None:
         REPLAY_MANIFEST = str(settings.replay_manifest)
+    if settings.embedding_provider == "replay" and settings.replay_manifest is not None:
+        # The replay provider's rows are filtered by the fixture's true model
+        # identity (repo id + pinned revision), so search only touches rows the
+        # replay path actually wrote.
+
+        from shiori.embedding_replay import ReplayError, replay_model_identity
+
+        try:
+            VOYAGE_MODEL = replay_model_identity(settings.replay_manifest)
+        except ReplayError:
+            raise QueryError(
+                "replay embedding provider could not resolve the fixture model identity",
+                code="replay_model_identity_unavailable",
+            ) from None
     if settings.pg_cred_file is not None:
         PG_CRED_PATH = str(settings.pg_cred_file)
     if settings.database_dsn is not None:
