@@ -30,8 +30,8 @@ VECTORS = FIXTURES / "vectors.json"
 CORPUS = FIXTURES / "corpus.jsonl"
 QUERIES = FIXTURES / "queries.jsonl"
 
-MODEL_ID = "voyage-4-nano"
-MODEL_REVISION = "voyageai/voyage-4-nano@main"
+MODEL_ID = "voyageai/voyage-4-nano"
+MODEL_REVISION = "67fabc9bef010dabc5f6024aa1b1b6b93410426f"
 
 
 def _model_key(model_id: str = MODEL_ID, model_revision: str = MODEL_REVISION) -> str:
@@ -60,10 +60,10 @@ def test_manifest_matches_fixture_schema() -> None:
     assert manifest.schema == MANIFEST_SCHEMA
     assert manifest.dimension == 1024
     assert manifest.normalized is True
-    assert manifest.model_id == "voyage-4-nano"
-    assert manifest.model_revision == "voyageai/voyage-4-nano@main"
+    assert manifest.model_id == "voyageai/voyage-4-nano"
+    assert manifest.model_revision == "67fabc9bef010dabc5f6024aa1b1b6b93410426f"
     assert manifest.model_key_identity == _model_key()
-    assert manifest.query_prompt and manifest.document_prompt
+    assert manifest.prompt_identity == {"query": "encode_query", "document": "encode_document"}
     assert manifest.corpus_input_type == "document"
     assert manifest.query_input_type == "query"
     assert manifest.key_format == "model_identity_fingerprint:input_type:sha256(text)"

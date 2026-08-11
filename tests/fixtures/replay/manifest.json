@@ -12,20 +12,22 @@
       "transformers": "4.56.2"
     },
     "library": "sentence-transformers",
-    "model": "voyageai/voyage-4-nano@main",
-    "model_id": "voyage-4-nano",
+    "model": "voyageai/voyage-4-nano",
+    "model_revision": "67fabc9bef010dabc5f6024aa1b1b6b93410426f",
     "name": "voyage-4-nano-offline",
-    "revision": "2026-08-11-1"
+    "revision": "2026-08-11-2"
   },
   "model": {
     "dimension": 1024,
-    "document_prompt": "Represent the document for retrieval:",
     "dtype": "float32",
-    "id": "voyage-4-nano",
-    "key_identity": "0d1bcc385afad0d44e0056114bc8e9b7b64bc4c9c6065156023fbd29e3d1f056",
+    "id": "voyageai/voyage-4-nano",
+    "key_identity": "86847a95cd3c1c99fd4089246fdaa98e59bbec187213bbb4c71ba1ea61696988",
     "normalized": true,
-    "query_prompt": "Represent the query for retrieving supporting documents:",
-    "revision": "voyageai/voyage-4-nano@main"
+    "prompt_identity": {
+      "document": "encode_document",
+      "query": "encode_query"
+    },
+    "revision": "67fabc9bef010dabc5f6024aa1b1b6b93410426f"
   },
   "queries": {
     "count": 6,
@@ -37,6 +39,6 @@
   "vectors": {
     "count": 10,
     "key_format": "model_identity_fingerprint:input_type:sha256(text)",
-    "sha256": "fe0fb3f0ba4de81c58dd0f9b12852145cca4897bc46e87d43f31aa13267b8099"
+    "sha256": "ad439d6f35aa8320da1692fe8afcd3a030620a03178301331742baa1efc0508c"
   }
 }

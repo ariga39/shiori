@@ -68,8 +68,7 @@ class ReplayManifest:
     dimension: int
     dtype: str
     normalized: bool
-    query_prompt: str
-    document_prompt: str
+    prompt_identity: dict[str, str]
     corpus_version: int
     query_version: int
     corpus_input_type: str
@@ -188,6 +187,16 @@ def load_manifest(manifest_path: Path) -> ReplayManifest:
             "replay manifest model key identity does not match model id/revision",
             code="replay_model_identity_mismatch",
         )
+    prompt_identity = model.get("prompt_identity")
+    if (
+        not isinstance(prompt_identity, dict)
+        or not isinstance(prompt_identity.get("query"), str)
+        or not isinstance(prompt_identity.get("document"), str)
+    ):
+        raise ReplayError(
+            "replay manifest model.prompt_identity is invalid",
+            code="replay_manifest_invalid",
+        )
     return ReplayManifest(
         schema=schema,
         generator_name=_require_str(generator, "name"),
@@ -198,8 +207,7 @@ def load_manifest(manifest_path: Path) -> ReplayManifest:
         dimension=dimension,
         dtype=_require_str(model, "dtype"),
         normalized=bool(model.get("normalized", False)),
-        query_prompt=_require_str(model, "query_prompt"),
-        document_prompt=_require_str(model, "document_prompt"),
+        prompt_identity={"query": prompt_identity["query"], "document": prompt_identity["document"]},
         corpus_version=_require_int(corpus, "version"),
         query_version=_require_int(queries, "version"),
         corpus_input_type=_require_str(corpus, "input_type"),

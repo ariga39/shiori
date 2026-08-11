@@ -29,15 +29,13 @@ import sys
 from pathlib import Path
 
 MANIFEST_SCHEMA = "shiori-replay-fixture/v1"
-MODEL_REVISION = "voyageai/voyage-4-nano@main"
-MODEL_ID = "voyage-4-nano"
+MODEL_ID = "voyageai/voyage-4-nano"
+MODEL_REVISION = "67fabc9bef010dabc5f6024aa1b1b6b93410426f"
 DIMENSION = 1024
 DTYPE = "float32"
 NORMALIZED = True
 GENERATOR_NAME = "voyage-4-nano-offline"
-GENERATOR_REVISION = "2026-08-11-1"
-QUERY_PROMPT = "Represent the query for retrieving supporting documents: "
-DOCUMENT_PROMPT = "Represent the document for retrieval: "
+GENERATOR_REVISION = "2026-08-11-2"
 
 
 def stable_text_hash(text: str) -> str:
@@ -88,16 +86,23 @@ def queries() -> list[str]:
 
 
 def _embed(model, texts: list[str], *, input_type: str) -> list[list[float]]:
-    """Embed with the pinned model and the input-type prompt, returning
-    normalized 1024-dim float vectors."""
-    prompt = QUERY_PROMPT if input_type == "query" else DOCUMENT_PROMPT
-    vectors = model.encode(
-        [prompt + text for text in texts],
-        prompt_name=input_type,
-        truncate_dim=DIMENSION,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-    )
+    """Embed with the pinned revision via encode_document / encode_query.
+
+    Uses the model's own task-specific encoders (same contract as the task #11
+    benchmark): documents via ``encode_document``, queries via ``encode_query``.
+    No extra prompt is applied here — the model's built-in prompts are used, so
+    the query/document input identity is exactly what the model defines.
+    """
+    kwargs = {
+        "truncate_dim": DIMENSION,
+        "precision": "float32",
+        "normalize_embeddings": True,
+        "show_progress_bar": False,
+    }
+    if input_type == "query":
+        vectors = model.encode_query(texts, **kwargs)
+    else:
+        vectors = model.encode_document(texts, **kwargs)
     result = []
     for vector in vectors:
         values = [float(value) for value in vector]
@@ -108,12 +113,11 @@ def _embed(model, texts: list[str], *, input_type: str) -> list[list[float]]:
     return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate the offline replay fixture")
     parser.add_argument("--sessions", type=Path, default=Path("tools/e2e-replay-sessions"))
     parser.add_argument("--out", type=Path, default=Path("tests/fixtures/replay"))
-    parser.add_argument("--model", type=str, default="voyageai/voyage-4-nano")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     corpus_texts = chunk_texts_from_sessions(args.sessions)
     if not corpus_texts:
@@ -126,7 +130,16 @@ def main() -> int:
 
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(args.model, trust_remote_code=True)
+    # Pin the exact model revision so vectors are reproducible and provably from
+    # this identity.  ``--model`` is intentionally absent: no arbitrary model may
+    # be substituted for the frozen fixture contract.
+    model = SentenceTransformer(
+        MODEL_ID,
+        revision=MODEL_REVISION,
+        trust_remote_code=True,
+        truncate_dim=DIMENSION,
+        device="cpu",
+    )
 
     # Composite keys: model identity + input_type + canonical text hash.  A
     # document and a query with the same text map to different vectors, and a
@@ -167,8 +180,8 @@ def main() -> int:
         "generator": {
             "name": GENERATOR_NAME,
             "revision": GENERATOR_REVISION,
-            "model": MODEL_REVISION,
-            "model_id": MODEL_ID,
+            "model": MODEL_ID,
+            "model_revision": MODEL_REVISION,
             "library": "sentence-transformers",
             "libraries": {
                 "sentence_transformers": _lib_version("sentence-transformers"),
@@ -182,8 +195,7 @@ def main() -> int:
             "dimension": DIMENSION,
             "dtype": DTYPE,
             "normalized": NORMALIZED,
-            "query_prompt": QUERY_PROMPT.strip(),
-            "document_prompt": DOCUMENT_PROMPT.strip(),
+            "prompt_identity": {"query": "encode_query", "document": "encode_document"},
             "key_identity": model_identity_fingerprint(MODEL_ID, MODEL_REVISION),
         },
         "corpus": {
