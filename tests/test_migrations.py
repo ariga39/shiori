@@ -257,7 +257,7 @@ def test_0001_equivalent_to_schema_sql(conn):
 def test_legacy_schema_bootstrap_is_adopted_before_migration(conn):
     """A real schema.sql database upgrades without replaying destructive DDL."""
     _reset_schema(conn)
-    schema = pathlib.Path(__file__).resolve().parents[1] / "schema.sql"
+    schema = pathlib.Path(__file__).resolve().parents[1] / "shiori" / "schema.sql"
     with conn.cursor() as cur:
         cur.execute(schema.read_text(encoding="utf-8"))
         cur.execute(
@@ -281,7 +281,7 @@ def test_legacy_migration_ledger_forward_converts_to_canonical_table(conn):
     upgrades in place: the legacy table is renamed to ``shiori_schema_migrations``
     with applied history and business data preserved exactly."""
     _reset_schema(conn)
-    schema = pathlib.Path(__file__).resolve().parents[1] / "schema.sql"
+    schema = pathlib.Path(__file__).resolve().parents[1] / "shiori" / "schema.sql"
     with conn.cursor() as cur:
         cur.execute(schema.read_text(encoding="utf-8"))
         cur.execute(
@@ -330,7 +330,7 @@ def test_legacy_migration_ledger_forward_converts_to_canonical_table(conn):
 def test_legacy_and_canonical_migration_tables_fail_closed(conn):
     """If both ledger tables exist, migrate fails closed instead of guessing."""
     _reset_schema(conn)
-    schema = pathlib.Path(__file__).resolve().parents[1] / "schema.sql"
+    schema = pathlib.Path(__file__).resolve().parents[1] / "shiori" / "schema.sql"
     with conn.cursor() as cur:
         cur.execute(schema.read_text(encoding="utf-8"))
         cur.execute(

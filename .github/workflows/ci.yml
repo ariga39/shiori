@@ -213,6 +213,23 @@ jobs:
           uv pip install --reinstall --python "${smoke_dir}/venv/bin/python" dist/*.tar.gz
           "${cli}" --help >/dev/null
 
+      - name: Fixture-backed full E2E replay smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_dir="$(mktemp -d)"
+          trap 'rm -rf "${smoke_dir}"' EXIT
+          uv venv --python 3.12 "${smoke_dir}/e2e-venv"
+          uv pip install --python "${smoke_dir}/e2e-venv/bin/python" dist/*.whl
+          SHIORI_TEST_DATABASE_MARKER="${SHIORI_TEST_DATABASE_MARKER}" \
+            tools/e2e_replay_smoke.sh \
+              --cli "${smoke_dir}/e2e-venv/bin/shiori" \
+              --python "${smoke_dir}/e2e-venv/bin/python" \
+              --dsn "${SHIORI_TEST_DATABASE_DSN}" \
+              --database-name "${SHIORI_TEST_DATABASE_NAME}" \
+              --workdir "${smoke_dir}/e2e" \
+              --fixture-dir tests/fixtures/replay
+
       - name: Audit reachable history and public build artifacts
         shell: bash
         run: uv run python tools/release_audit.py --root . --artifact-dir dist

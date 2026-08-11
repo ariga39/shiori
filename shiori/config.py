@@ -188,6 +188,7 @@ class Settings:
     voyage_api_key: str | None = None
     voyage_key_file: Path | None = None
     voyage_model: str | None = None
+    replay_manifest: Path | None = None
     embed_dim: int | None = None
     allow_fake_embeddings: bool = False
     environment: str | None = None
@@ -280,6 +281,22 @@ class Settings:
         missing = []
         if not self.embedding_provider:
             missing.append("SHIORI_EMBEDDING_PROVIDER")
+        if self.embedding_provider == "replay":
+            if not self.replay_manifest:
+                missing.append("SHIORI_REPLAY_MANIFEST")
+            elif not self.replay_manifest.is_file():
+                raise ConfigError(
+                    "replay manifest file does not exist",
+                    code="replay_manifest_not_found",
+                )
+            if self.embed_dim is None:
+                missing.append("SHIORI_EMBED_DIM")
+            if missing:
+                raise ConfigError(
+                    "embedding configuration is incomplete: " + ", ".join(missing),
+                    code="embedding_not_configured",
+                )
+            return
         if self.embedding_provider == "fake":
             if self.environment not in {"development", "test"}:
                 raise ConfigError(
@@ -399,6 +416,7 @@ _ENV_FIELDS: dict[str, tuple[str, ...]] = {
     "voyage_api_key": ("SHIORI_VOYAGE_API_KEY", "SHIORI_VOYAGE_KEY"),
     "voyage_key_file": ("SHIORI_VOYAGE_KEY_FILE",),
     "voyage_model": ("SHIORI_VOYAGE_MODEL",),
+    "replay_manifest": ("SHIORI_REPLAY_MANIFEST",),
     "embed_dim": ("SHIORI_EMBED_DIM",),
     "allow_fake_embeddings": ("SHIORI_ALLOW_FAKE_EMBEDDINGS",),
     "environment": ("SHIORI_ENVIRONMENT",),
@@ -428,6 +446,7 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, ...]] = {
     "voyage_api_key": ("SHIYI_VOYAGE_API_KEY", "SHIYI_VOYAGE_KEY"),
     "voyage_key_file": ("SHIYI_VOYAGE_KEY_FILE",),
     "voyage_model": ("SHIYI_VOYAGE_MODEL",),
+    "replay_manifest": ("SHIYI_REPLAY_MANIFEST",),
     "embed_dim": ("SHIYI_EMBED_DIM",),
     "allow_fake_embeddings": ("SHIYI_ALLOW_FAKE_EMBEDDINGS",),
     "environment": ("SHIYI_ENVIRONMENT",),
@@ -443,7 +462,7 @@ _LEGACY_ENV_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
-_PATH_FIELDS = {"sessions_dir", "hermes_db", "discord_archive_dir", "pg_cred_file", "voyage_key_file", "log_file"}
+_PATH_FIELDS = {"sessions_dir", "hermes_db", "discord_archive_dir", "pg_cred_file", "voyage_key_file", "replay_manifest", "log_file"}
 _INT_FIELDS = {
     "embed_dim",
     "chunk_tokens",
