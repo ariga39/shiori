@@ -14,8 +14,8 @@
         "time": 0
       },
       "control_latency_ms": {
-        "p50_ms": 53.931,
-        "p95_ms": 55.858,
+        "p50_ms": 53.56,
+        "p95_ms": 56.811,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -26,8 +26,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 23.176,
-        "p95_ms": 23.956,
+        "p50_ms": 22.398,
+        "p95_ms": 24.214,
         "sample_count": 10
       },
       "filtered_returned": 1,
@@ -48,8 +48,8 @@
         "time": 0
       },
       "control_latency_ms": {
-        "p50_ms": 51.364,
-        "p95_ms": 53.166,
+        "p50_ms": 49.473,
+        "p95_ms": 50.422,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -60,8 +60,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 21.329,
-        "p95_ms": 22.393,
+        "p50_ms": 21.361,
+        "p95_ms": 21.668,
         "sample_count": 10
       },
       "filtered_returned": 1,
@@ -82,8 +82,8 @@
         "time": 0
       },
       "control_latency_ms": {
-        "p50_ms": 54.936,
-        "p95_ms": 57.143,
+        "p50_ms": 52.622,
+        "p95_ms": 55.315,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -94,8 +94,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 21.883,
-        "p95_ms": 23.594,
+        "p50_ms": 21.729,
+        "p95_ms": 24.184,
         "sample_count": 10
       },
       "filtered_returned": 3,
@@ -116,8 +116,8 @@
         "time": 10
       },
       "control_latency_ms": {
-        "p50_ms": 57.278,
-        "p95_ms": 58.634,
+        "p50_ms": 53.283,
+        "p95_ms": 64.046,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -129,8 +129,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 24.183,
-        "p95_ms": 25.313,
+        "p50_ms": 22.693,
+        "p95_ms": 24.681,
         "sample_count": 10
       },
       "filtered_returned": 3,
@@ -151,8 +151,8 @@
         "time": 0
       },
       "control_latency_ms": {
-        "p50_ms": 52.409,
-        "p95_ms": 54.955,
+        "p50_ms": 52.063,
+        "p95_ms": 53.311,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -163,8 +163,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 23.667,
-        "p95_ms": 28.469,
+        "p50_ms": 22.78,
+        "p95_ms": 23.757,
         "sample_count": 10
       },
       "filtered_returned": 1,
@@ -185,8 +185,8 @@
         "time": 3
       },
       "control_latency_ms": {
-        "p50_ms": 56.526,
-        "p95_ms": 58.197,
+        "p50_ms": 52.282,
+        "p95_ms": 54.699,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -198,8 +198,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 22.892,
-        "p95_ms": 24.047,
+        "p50_ms": 20.136,
+        "p95_ms": 20.857,
         "sample_count": 10
       },
       "filtered_returned": 0,
@@ -220,8 +220,8 @@
         "time": 12
       },
       "control_latency_ms": {
-        "p50_ms": 56.676,
-        "p95_ms": 59.102,
+        "p50_ms": 53.443,
+        "p95_ms": 57.318,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -233,8 +233,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 23.201,
-        "p95_ms": 25.773,
+        "p50_ms": 21.267,
+        "p95_ms": 22.785,
         "sample_count": 10
       },
       "filtered_returned": 1,
@@ -255,8 +255,8 @@
         "time": 0
       },
       "control_latency_ms": {
-        "p50_ms": 54.235,
-        "p95_ms": 56.488,
+        "p50_ms": 52.986,
+        "p95_ms": 55.55,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -267,8 +267,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 21.745,
-        "p95_ms": 24.354,
+        "p50_ms": 21.617,
+        "p95_ms": 22.577,
         "sample_count": 10
       },
       "filtered_returned": 1,
@@ -289,8 +289,8 @@
         "time": 0
       },
       "control_latency_ms": {
-        "p50_ms": 52.555,
-        "p95_ms": 62.599,
+        "p50_ms": 52.43,
+        "p95_ms": 54.987,
         "sample_count": 10
       },
       "control_returned": 13,
@@ -301,8 +301,8 @@
       ],
       "filtered_is_order_preserving_subsequence": true,
       "filtered_latency_ms": {
-        "p50_ms": 22.167,
-        "p95_ms": 23.974,
+        "p50_ms": 23.008,
+        "p95_ms": 24.454,
         "sample_count": 10
       },
       "filtered_returned": 1,
@@ -312,7 +312,7 @@
   ],
   "dev_count": 9,
   "embedding_mode": "pinned_local_replay",
-  "harness_sha": "352e8c18cf1c71711aff135a9c363bb2089ae22c",
+  "harness_sha": "1bc012d68f0775ac3ee87e735f4cf45202d082ae",
   "holdout_ids_used": [],
   "implementation_sha": "6621a680c64beb48a852b6f0fae098ea9235137b",
   "input_hashes": {
@@ -328,10 +328,10 @@
     "time_filter": 3
   },
   "latency": {
-    "control_p50_ms": 54.154,
-    "control_p95_ms": 58.497,
-    "filtered_p50_ms": 22.633,
-    "filtered_p95_ms": 25.134,
+    "control_p50_ms": 52.282,
+    "control_p95_ms": 56.113,
+    "filtered_p50_ms": 21.581,
+    "filtered_p95_ms": 24.184,
     "latency_reps": 10
   },
   "leakage_by_kind": {

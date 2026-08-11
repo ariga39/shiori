@@ -1,7 +1,7 @@
 # Phase 4E1 dev-only filter evaluation
 
 - schema: `shiori-filter-eval/v4`
-- harness SHA: `352e8c18cf1c71711aff135a9c363bb2089ae22c`
+- harness SHA: `1bc012d68f0775ac3ee87e735f4cf45202d082ae`
 - implementation SHA: `6621a680c64beb48a852b6f0fae098ea9235137b`
 - embedding mode: `pinned_local_replay`
 - model identity: `voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f`
@@ -13,7 +13,7 @@
 - total before leakage (rows): 105
 - total after leakage (rows): 0
 - total coverage risk (rows): 0
-- latency p50/p95 (aggregate over 90 raw samples): {"control_p50_ms": 54.154, "control_p95_ms": 58.497, "filtered_p50_ms": 22.633, "filtered_p95_ms": 25.134, "latency_reps": 10}
+- latency p50/p95 (aggregate over 90 raw samples): {"control_p50_ms": 52.282, "control_p95_ms": 56.113, "filtered_p50_ms": 21.581, "filtered_p95_ms": 24.184, "latency_reps": 10}
 - unfiltered regression: {"base_head_latency_p50_p95_ms": {"+dedup": {"base_p50": 38.561, "base_p95": 42.873, "head_p50": 37.886, "head_p95": 42.801}, "+exact": {"base_p50": 19.709, "base_p95": 21.812, "head_p50": 19.284, "head_p95": 21.927}, "+temporal": {"base_p50": 20.151, "base_p95": 22.452, "head_p50": 19.958, "head_p95": 22.302}, "dense-only": {"base_p50": 18.616, "base_p95": 21.351, "head_p50": 18.292, "head_p95": 21.239}, "lexical-only": {"base_p50": 12.824, "base_p95": 13.987, "head_p50": 12.893, "head_p95": 13.818}, "rrf": {"base_p50": 19.632, "base_p95": 21.703, "head_p50": 18.376, "head_p95": 20.674}}, "config_metric_deltas": {"+dedup": {"candidate_recall_at_20": 0.0, "filter_leakage": 0, "final_mrr@10": 0.0, "final_ndcg@10": 0.0, "final_recall@5": 0.0}, "+exact": {"candidate_recall_at_20": 0.0, "filter_leakage": 0, "final_mrr@10": 0.0, "final_ndcg@10": 0.0, "final_recall@5": 0.0}, "+temporal": {"candidate_recall_at_20": 0.0, "filter_leakage": 0, "final_mrr@10": 0.0, "final_ndcg@10": 0.0, "final_recall@5": 0.0}, "dense-only": {"candidate_recall_at_20": 0.0, "filter_leakage": 0, "final_mrr@10": 0.0, "final_ndcg@10": 0.0, "final_recall@5": 0.0}, "lexical-only": {"candidate_recall_at_20": 0.0, "filter_leakage": 0, "final_mrr@10": 0.0, "final_ndcg@10": 0.0, "final_recall@5": 0.0}, "rrf": {"candidate_recall_at_20": 0.0, "filter_leakage": 0, "final_mrr@10": 0.0, "final_ndcg@10": 0.0, "final_recall@5": 0.0}}, "frozen_baseline_runner_sha256": "5192a02e75d93a0b775db9851bae298cc2d2333271c2d533228fac14d70c157c", "head_runner_sha256": "5895d6ab64406c4f997ec8845a87c75562b411272ea636956519d18c95349eeb", "score_tolerance_note": "score-only diffs are ~1e-9 float noise from temporal-decay now between separate runs; doc/rank/reason/stage diffs are the regression signal", "trace_mismatch": {"doc_rank_reason_stage": 0, "events": 23427, "score_only": 4269}}
 - ok: True
 
