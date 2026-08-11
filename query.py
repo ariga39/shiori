@@ -7,9 +7,10 @@ Usage: python3 query.py "search query" [--limit N] [--offset N]
 """
 
 import argparse
+import re
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import isfinite
 from numbers import Real
 from typing import Any
@@ -198,6 +199,133 @@ class SearchPage:
     offset: int
     has_more: bool
     next_offset: int | None
+
+
+# Bounds for filter inputs (fail closed before SQL).
+MAX_FILTER_VALUES = 50
+MAX_SOURCE_TYPE_LEN = 50
+MAX_SESSION_ID_LEN = 128
+
+
+@dataclass(frozen=True)
+class SearchFilters:
+    """Typed, backward-compatible filter contract for hybrid search.
+
+    ``None``/empty collections keep the current unfiltered behavior exactly.
+    ``from_inputs`` is the only public constructor: it validates raw sequences
+    (rejects a single string treated as an array, booleans, non-strings, more
+    than ``MAX_FILTER_VALUES`` entries, duplicates) before canonicalizing to
+    sorted tuples.  Time bounds are UTC-aware datetimes; ``time_from`` is
+    inclusive on ``timestamp_start`` and ``time_to`` is exclusive, and rows
+    with a NULL ``timestamp_start`` never match an explicit time filter.
+    """
+
+    source_types: tuple[str, ...] = ()
+    session_ids: tuple[str, ...] = ()
+    time_from: datetime | None = None
+    time_to: datetime | None = None
+
+    def __post_init__(self) -> None:
+        # Re-validate canonical state so direct construction cannot bypass
+        # from_inputs' fail-closed guarantees.  Canonical tuples must be
+        # unique, sorted, bounded, and every item a non-empty string.
+        for name, values, max_len in (
+            ("source_types", self.source_types, MAX_SOURCE_TYPE_LEN),
+            ("session_ids", self.session_ids, MAX_SESSION_ID_LEN),
+        ):
+            if not isinstance(values, tuple):
+                raise QueryError(f"{name} must be a canonical tuple", code="invalid_filter_type")
+            if len(values) > MAX_FILTER_VALUES:
+                raise QueryError(f"{name} exceeds {MAX_FILTER_VALUES} values", code="filter_count_exceeded")
+            if values != tuple(sorted(values)):
+                raise QueryError(f"{name} must be canonical sorted", code="invalid_filter_type")
+            for item in values:
+                if isinstance(item, bool) or not isinstance(item, str):
+                    raise QueryError(f"{name} contains a non-string value", code="invalid_filter_value")
+                if not item or len(item) > max_len:
+                    raise QueryError(f"{name} contains an invalid value", code="invalid_filter_value")
+            if len(set(values)) != len(values):
+                raise QueryError(f"{name} contains a duplicate value", code="duplicate_filter_value")
+        for name, value in (("time_from", self.time_from), ("time_to", self.time_to)):
+            if value is not None:
+                if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() != timedelta(0):
+                    raise QueryError(f"{name} must be UTC-aware (offset 0)", code="invalid_timezone")
+        if self.time_from is not None and self.time_to is not None and self.time_from >= self.time_to:
+            raise QueryError("time_from must be before time_to", code="invalid_time_range")
+
+    @classmethod
+    def from_inputs(
+        cls,
+        *,
+        source_types: Any = None,
+        session_ids: Any = None,
+        time_from: Any = None,
+        time_to: Any = None,
+    ) -> "SearchFilters":
+        """Validate and canonicalize raw filter inputs (fail closed)."""
+        src = cls._validate_values("source_types", source_types, max_len=MAX_SOURCE_TYPE_LEN)
+        sess = cls._validate_values("session_ids", session_ids, max_len=MAX_SESSION_ID_LEN)
+        tf = cls._validate_time("time_from", time_from)
+        tt = cls._validate_time("time_to", time_to)
+        if tf is not None and tt is not None and tf >= tt:
+            raise QueryError("time_from must be before time_to", code="invalid_time_range")
+        return cls(source_types=src, session_ids=sess, time_from=tf, time_to=tt)
+
+    @staticmethod
+    def _validate_values(name: str, value: Any, *, max_len: int) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)):
+            raise QueryError(f"{name} must be a list or tuple of strings", code="invalid_filter_type")
+        items = list(value)
+        if len(items) > MAX_FILTER_VALUES:
+            raise QueryError(f"{name} exceeds {MAX_FILTER_VALUES} values", code="filter_count_exceeded")
+        seen: set[str] = set()
+        for item in items:
+            if isinstance(item, bool) or not isinstance(item, str):
+                raise QueryError(f"{name} contains a non-string value", code="invalid_filter_value")
+            if not item:
+                raise QueryError(f"{name} contains an empty string", code="invalid_filter_value")
+            if len(item) > max_len:
+                raise QueryError(f"{name} value exceeds length limit", code="invalid_filter_value")
+            if item in seen:
+                raise QueryError(f"{name} contains a duplicate value", code="duplicate_filter_value")
+            seen.add(item)
+        return tuple(sorted(items))
+
+    # RFC3339 full timestamp: YYYY-MM-DD'T'HH:MM:SS[.fraction]('Z'|'+00:00')
+    _RFC3339_RE = re.compile(
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$"
+    )
+
+    @staticmethod
+    def _validate_time(name: str, value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            # Strict RFC3339 UTC: full date/time with seconds, optional fraction,
+            # and ONLY Z or +00:00 suffix.  Reject space-separated, compact,
+            # missing-seconds, naive, and non-zero-offset forms.
+            if not SearchFilters._RFC3339_RE.match(value):
+                raise QueryError(f"{name} is not a valid RFC3339 UTC timestamp", code="invalid_time_format")
+            raw = value[:-1] + "+00:00" if value.endswith("Z") else value
+            try:
+                parsed = datetime.fromisoformat(raw)
+            except ValueError as exc:
+                raise QueryError(f"{name} is not a valid RFC3339 UTC timestamp", code="invalid_time_format") from exc
+            if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+                raise QueryError(f"{name} must be UTC", code="invalid_timezone")
+        elif isinstance(value, datetime):
+            if value.tzinfo is None or value.utcoffset() != timedelta(0):
+                raise QueryError(f"{name} must be UTC-aware", code="invalid_timezone")
+            parsed = value
+        else:
+            raise QueryError(f"{name} must be a datetime or RFC3339 string", code="invalid_time_format")
+        return parsed.replace(tzinfo=UTC)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.source_types and not self.session_ids and self.time_from is None and self.time_to is None
 
 
 def _validate_query_text(query_text: Any) -> str:
@@ -470,9 +598,105 @@ def _build_tsquery(query_text: str) -> str:
     return " & ".join(terms)
 
 
-def search(query, limit=DEFAULT_LIMIT, offset=0):
+def _filter_predicate(filters: SearchFilters | None) -> tuple[str, tuple[Any, ...]]:
+    """Build the shared parameterized WHERE fragment for every candidate SQL path.
+
+    Returns (sql_fragment, params).  The fragment is appended before ranking /
+    candidate limits.  No string interpolation of values ever occurs.
+    """
+    if filters is None or filters.is_empty:
+        return "", ()
+    clauses: list[str] = []
+    params: list[Any] = []
+    if filters.source_types:
+        clauses.append(f"source_type IN ({', '.join(['%s'] * len(filters.source_types))})")
+        params.extend(filters.source_types)
+    if filters.session_ids:
+        clauses.append(f"session_id IN ({', '.join(['%s'] * len(filters.session_ids))})")
+        params.extend(filters.session_ids)
+    if filters.time_from is not None or filters.time_to is not None:
+        # Explicit time filter: NULL timestamp_start never matches.
+        clauses.append("timestamp_start IS NOT NULL")
+        if filters.time_from is not None:
+            clauses.append("timestamp_start >= %s")
+            params.append(filters.time_from)
+        if filters.time_to is not None:
+            clauses.append("timestamp_start < %s")
+            params.append(filters.time_to)
+    return " AND " + " AND ".join(clauses), tuple(params)
+
+
+def _candidate_matches_filters(row: tuple[Any, ...], filters: SearchFilters | None) -> bool:
+    """Invariant for raw SQL candidate rows (layout: id, content, score,
+    timestamp_start, session_id, source_type, embedding, created_at, model, dim).
+
+    A naive timestamp from the DB is never auto-attached a timezone: under an
+    explicit time filter a naive timestamp is treated as non-matching (fail
+    closed) rather than guessed UTC.
+    """
+    if filters is None or filters.is_empty:
+        return True
+    ts = row[3]
+    session_id = row[4]
+    source_type = row[5]
+    if filters.source_types and source_type not in filters.source_types:
+        return False
+    if filters.session_ids and session_id not in filters.session_ids:
+        return False
+    if filters.time_from is not None or filters.time_to is not None:
+        if ts is None or ts.tzinfo is None:
+            return False
+        aware = ts.astimezone(UTC)
+        if filters.time_from is not None and aware < filters.time_from:
+            return False
+        if filters.time_to is not None and aware >= filters.time_to:
+            return False
+    return True
+
+
+def _row_matches_filters(row: tuple[Any, ...], filters: SearchFilters | None) -> bool:
+    """Post-SQL invariant: every final result must satisfy the filters.
+
+    Final result rows have layout
+    ``(content, score, timestamp_start, session_id, source_type, model, dim)``.
+    A leakage here fails closed (``filter_leakage``) instead of silently dropping.
+    """
+    if filters is None or filters.is_empty:
+        return True
+    ts = row[2]
+    session_id = row[3]
+    source_type = row[4]
+    if filters.source_types and source_type not in filters.source_types:
+        return False
+    if filters.session_ids and session_id not in filters.session_ids:
+        return False
+    if filters.time_from is not None or filters.time_to is not None:
+        # A naive timestamp is never matched under an explicit time filter
+        # (fail closed); we do not guess a timezone.
+        if ts is None or ts.tzinfo is None:
+            return False
+        aware = ts.astimezone(UTC)
+        if filters.time_from is not None and aware < filters.time_from:
+            return False
+        if filters.time_to is not None and aware >= filters.time_to:
+            return False
+    return True
+
+
+def _coerce_filters(filters: SearchFilters | None) -> SearchFilters:
+    """Type-gate the public filters parameter (None or SearchFilters only)."""
+    if filters is None:
+        return SearchFilters()
+    if not isinstance(filters, SearchFilters):
+        raise QueryError("filters must be a SearchFilters instance", code="invalid_filter_type")
+    return filters
+
+
+def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | None = None):
     query = _validate_query_text(query)
     limit, offset = _normalise_search_args(limit, offset)
+    filters = _coerce_filters(filters)
+    filter_sql, filter_params = _filter_predicate(filters)
     eval_ctx = _current_eval()
     config = eval_ctx.config if eval_ctx is not None else StageConfig()
     config.validate()
@@ -540,10 +764,21 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
                 WHERE embedding IS NOT NULL
                   AND embedding_model = %s
                   AND vector_dims(embedding) = %s
+                """ + filter_sql + """
                 ORDER BY embedding <=> %s::vector, id
                 LIMIT %s
-            """, (str(query_embedding), VOYAGE_MODEL, EMBED_DIM, str(query_embedding), pool))
+            """, (str(query_embedding), VOYAGE_MODEL, EMBED_DIM, *filter_params, str(query_embedding), pool))
             vector_rows = cur.fetchall()
+            for row in vector_rows:
+                if not _candidate_matches_filters(row, filters):
+                    raise QueryError("vector candidate violated the active filters", code="filter_leakage")
+        except QueryError:
+            # Fail closed WITHOUT leaking the connection/cursor.
+            try:
+                cur.close()
+            finally:
+                conn.close()
+            raise
         except Exception as exc:
             conn.rollback()
             cur.close()
@@ -586,10 +821,20 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
                 WHERE content_tsvector @@ to_tsquery('simple', %s)
                   AND embedding_model = %s
                   AND (embedding IS NULL OR vector_dims(embedding) = %s)
+                """ + filter_sql + """
                 ORDER BY tscore DESC, id
                 LIMIT %s
-            """, (tsq, tsq, VOYAGE_MODEL, EMBED_DIM, pool))
+            """, (tsq, tsq, VOYAGE_MODEL, EMBED_DIM, *filter_params, pool))
             bm25_rows = cur.fetchall()
+            for row in bm25_rows:
+                if not _candidate_matches_filters(row, filters):
+                    raise QueryError("ts_rank_cd candidate violated the active filters", code="filter_leakage")
+        except QueryError:
+            try:
+                cur.close()
+            finally:
+                conn.close()
+            raise
         except Exception:
             # tsvector column might not exist yet during migration. The failed
             # query aborts the transaction; roll it back so the pg_trgm fallback
@@ -640,10 +885,20 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
                 WHERE content ILIKE %s ESCAPE '\\'
                 AND embedding_model = %s
                 AND (embedding IS NULL OR vector_dims(embedding) = %s)
+                """ + filter_sql + """
                 ORDER BY timestamp_start DESC NULLS LAST, id
                 LIMIT %s
-            """, (f"%{escaped}%", VOYAGE_MODEL, EMBED_DIM, pool))
+            """, (f"%{escaped}%", VOYAGE_MODEL, EMBED_DIM, *filter_params, pool))
             exact_rows = cur.fetchall()
+            for row in exact_rows:
+                if not _candidate_matches_filters(row, filters):
+                    raise QueryError("exact candidate violated the active filters", code="filter_leakage")
+        except QueryError:
+            try:
+                cur.close()
+            finally:
+                conn.close()
+            raise
         except Exception:
             conn.rollback()
         _exact_s = time.perf_counter() - _t2
@@ -681,15 +936,25 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
                 WHERE content %% %s
                   AND embedding_model = %s
                   AND (embedding IS NULL OR vector_dims(embedding) = %s)
+                """ + filter_sql + """
                 ORDER BY similarity(content, %s) DESC, id
                 LIMIT %s
-            """, (query, query, VOYAGE_MODEL, EMBED_DIM, query, pool))
+            """, (query, query, VOYAGE_MODEL, EMBED_DIM, *filter_params, query, pool))
             trigram_rows = cur.fetchall()
+            for row in trigram_rows:
+                if not _candidate_matches_filters(row, filters):
+                    raise QueryError("trigram candidate violated the active filters", code="filter_leakage")
             trigram_used = True
             # Preserve production behavior: the trigram results remain the
             # lexical channel for RRF fusion below (the trace reports the same
             # rows under the "trigram" stage name, separately observable).
             bm25_rows = trigram_rows
+        except QueryError:
+            try:
+                cur.close()
+            finally:
+                conn.close()
+            raise
         except Exception:
             conn.rollback()
             trigram_rows = []
@@ -883,10 +1148,26 @@ def search(query, limit=DEFAULT_LIMIT, offset=0):
         + [{"latency_ms": _dedup_s * 1000.0, "reason": "stage" if config.dedup else "stage_disabled"}],
     )
 
+    # Post-SQL invariant: every final candidate must satisfy the filters.
+    # A leakage here fails closed (filter_leakage) instead of silently dropping.
+    if not filters.is_empty:
+        for row in selected:
+            if not _row_matches_filters(row, filters):
+                raise QueryError(
+                    "search result violated the active filters",
+                    code="filter_leakage",
+                )
+
     return selected[offset : offset + limit]
 
 
-def search_page(query_text: str, *, limit: int = MAX_PAGE_LIMIT, offset: int = 0) -> SearchPage:
+def search_page(
+    query_text: str,
+    *,
+    limit: int = MAX_PAGE_LIMIT,
+    offset: int = 0,
+    filters: SearchFilters | None = None,
+) -> SearchPage:
     """Return a bounded, stable page without exposing an unbounded count query."""
     query_text = _validate_query_text(query_text)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
@@ -894,11 +1175,15 @@ def search_page(query_text: str, *, limit: int = MAX_PAGE_LIMIT, offset: int = 0
     if limit > MAX_PAGE_LIMIT:
         raise QueryError(f"limit must be at most {MAX_PAGE_LIMIT}", code="limit_out_of_bounds")
     _, offset = _normalise_search_args(limit, offset)
+    filters = _coerce_filters(filters)
     # Ask the compatibility search function for one look-ahead row.  Calling
     # it without ``offset`` at zero keeps monkeypatched/legacy integrations
     # working while still making ``has_more`` truthful.
     requested = offset + limit + 1
-    all_rows = search(query_text, limit=requested)
+    if filters.is_empty:
+        all_rows = search(query_text, limit=requested)
+    else:
+        all_rows = search(query_text, limit=requested, filters=filters)
     page = all_rows[offset : offset + limit]
     has_more = len(all_rows) > offset + limit
     return SearchPage(
@@ -921,6 +1206,10 @@ def main(argv=None):
         action="store_true",
         help="Explicit migration mode: use legacy OpenClaw paths when SHIORI_* is unset",
     )
+    parser.add_argument("--source-type", action="append", default=[], help="Filter by exact source_type (repeatable)")
+    parser.add_argument("--session-id", action="append", default=[], help="Filter by exact session_id (repeatable)")
+    parser.add_argument("--time-from", default=None, help="UTC RFC3339 lower bound (inclusive on timestamp_start)")
+    parser.add_argument("--time-to", default=None, help="UTC RFC3339 upper bound (exclusive on timestamp_start)")
     args = parser.parse_args(argv)
 
     settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
@@ -928,7 +1217,13 @@ def main(argv=None):
     settings.require_embedding()
     apply_settings(settings)
 
-    results = search(args.query, args.limit, args.offset)
+    filters = SearchFilters.from_inputs(
+        source_types=args.source_type if args.source_type else None,
+        session_ids=args.session_id if args.session_id else None,
+        time_from=args.time_from,
+        time_to=args.time_to,
+    )
+    results = search(args.query, args.limit, args.offset, filters=filters)
 
     if not results:
         print("No results found.")
