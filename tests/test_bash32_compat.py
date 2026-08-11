@@ -173,6 +173,12 @@ def test_runtime_smoke_volume_scan_under_bash32(tmp_path: Path) -> None:
                       exit 0 ;;
                     *"SELECT count(*) FROM shiori_container_smoke;")
                       printf '%s\\n' '1'; exit 0 ;;
+                    *"CREATE TEMP TABLE"*)
+                      # Post-restart write probe: write result + new generation.
+                      printf '%s\\n' '1'; printf '%s\\n' 'gen-b'; exit 0 ;;
+                    *"pg_postmaster_start_time"*)
+                      # Pre-restart generation identity.
+                      printf '%s\\n' 'gen-a'; exit 0 ;;
                   esac
                   exit 0 ;;
                 *) exit 0 ;;
