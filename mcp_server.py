@@ -27,7 +27,9 @@ TOOL_DESCRIPTION = (
     "Search session memory (hybrid vector + BM25 retrieval). "
     "Returns a bounded page (limit default 5, max 20; offset is bounded) with "
     "has_more/next_offset and content, score, timestamp, session_id, "
-    "source_type, model/dimension, and provenance. Incompatible embedding "
+    "source_type, model/dimension, and provenance. Optional filters: "
+    "source_types/session_ids are bounded exact-value arrays, time_from/time_to "
+    "are UTC RFC3339 bounds on timestamp_start. Incompatible embedding "
     "models/dimensions are excluded. Read-only; no writes are exposed."
 )
 
@@ -49,11 +51,13 @@ def _invalid_input(code: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code}}
 
 
-def run_search(query_text, limit=DEFAULT_LIMIT, offset=0):
+def run_search(query_text, limit=DEFAULT_LIMIT, offset=0, *, source_types=None, session_ids=None, time_from=None, time_to=None):
     """Run a search, returning a JSON-serializable dict.
 
-    On any error (empty query, embedding failure, DB unreachable) returns
-    a stable, secret-safe error object. Exception text is deliberately omitted
+    Optional ``source_types``/``session_ids`` are bounded arrays of exact
+    values; ``time_from``/``time_to`` are UTC RFC3339 strings.  On any error
+    (empty query, embedding failure, DB unreachable, invalid filter) returns a
+    stable, secret-safe error object. Exception text is deliberately omitted
     because database/client errors can contain DSNs or credentials.
     """
     if not isinstance(query_text, str):
@@ -76,7 +80,20 @@ def run_search(query_text, limit=DEFAULT_LIMIT, offset=0):
     clamped = min(limit, MAX_LIMIT)
 
     try:
-        page = query.search_page(query_text, limit=clamped, offset=offset)
+        filters = query.SearchFilters.from_inputs(
+            source_types=source_types,
+            session_ids=session_ids,
+            time_from=time_from,
+            time_to=time_to,
+        )
+    except query.QueryError as exc:
+        return {"error": {"code": exc.code}}
+
+    try:
+        if filters.is_empty:
+            page = query.search_page(query_text, limit=clamped, offset=offset)
+        else:
+            page = query.search_page(query_text, limit=clamped, offset=offset, filters=filters)
         results = [
             _serialize_result(row)
             for row in page.results
@@ -84,7 +101,7 @@ def run_search(query_text, limit=DEFAULT_LIMIT, offset=0):
     except Exception as exc:  # noqa: BLE001 - map failures to a safe public result
         return {"error": _public_error(exc)}
 
-    return {
+    payload: dict = {
         "results": results,
         "count": len(results),
         "limit": page.limit,
@@ -92,6 +109,16 @@ def run_search(query_text, limit=DEFAULT_LIMIT, offset=0):
         "has_more": page.has_more,
         "next_offset": page.next_offset,
     }
+    # Only add a filter summary when filters are active, preserving the exact
+    # unfiltered response shape (byte/key equivalence with base).
+    if not filters.is_empty:
+        payload["filters_applied"] = {
+            "source_types": bool(filters.source_types),
+            "session_ids": bool(filters.session_ids),
+            "time_from": filters.time_from.isoformat() if filters.time_from else None,
+            "time_to": filters.time_to.isoformat() if filters.time_to else None,
+        }
+    return payload
 
 
 def _serialize_result(row: tuple) -> dict:
@@ -109,8 +136,24 @@ def _serialize_result(row: tuple) -> dict:
     }
 
 
-async def _search_tool(query: str, limit: int = DEFAULT_LIMIT, offset: int = 0) -> dict:
-    return run_search(query, limit, offset)
+async def _search_tool(
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+    offset: int = 0,
+    source_types: list[str] | None = None,
+    session_ids: list[str] | None = None,
+    time_from: str | None = None,
+    time_to: str | None = None,
+) -> dict:
+    return run_search(
+        query,
+        limit,
+        offset,
+        source_types=source_types,
+        session_ids=session_ids,
+        time_from=time_from,
+        time_to=time_to,
+    )
 
 
 class ShiyiMCPServer(FastMCP):
