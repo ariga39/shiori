@@ -406,3 +406,96 @@ def test_phase4e3_results_and_dedup_contract():
         assert (qid, "doc-0017") in dropped, f"expected true-duplicate drop {qid}/doc-0017"
         assert (qid, "doc-0018") in recovered, f"expected representative keep {qid}/doc-0018"
     assert ("q-0042", "doc-0019") in recovered, "expected q-0042 zh representative doc-0019 keep"
+
+
+P4E3_MANIFEST = PRODUCT_EVAL / "phase4e3_72_manifest.json"
+P4E3_REPORT = PRODUCT_EVAL / "phase4e3_72_report.md"
+P4E3_REPORT_TITLE = "# Shiori Phase 4E3 Provenance-Preserving Dedup Report (72 development queries)"
+P4E3_REPORT_NOTES = [
+    "Phase 4E3 changes only dedup: byte-identical content is collapsed only within exact session/source provenance while the >0.85 cosine guard remains unchanged.",
+    "Coverage risk decreases from 12 to 5; the remaining five relevant drops are byte-identical doc-0017 with same-provenance doc-0018 kept.",
+    "q-0039 doc-0002 is recovered; q-0042 keeps doc-0019 and representative doc-0018 while byte-identical doc-0017 is folded.",
+    "The first five configs preserve metrics and projected stage/doc_id/rank/reason traces; latency changed, and q-0057 temporal score magnitude drifts with evaluation time.",
+    "No-evidence false returns remain 9; counterfactual source/session/time values 9/9/3 are not active-filter leakage.",
+]
+P4E3_MEASUREMENT_LINEAGE = {
+    "phase4e2_results": "d37ce61fda0dcedcf835769a1b3e64fb3fb17ed60abc88e59ff743fd8849d28e",
+    "raw_72": "4a4ea23e40da4e7a177e53d95b4050d60e503c44235e442ac45b5cb880cb65e2",
+    "postprocessed_72": "91cf669144daef112309895324f17f23bc4063acc5c740d73ffcf451e02796a9",
+    "dev_query_vectors": "629fa726ec353632a2a87a48b473ad0b59c2dd8f61a804746e2d9dd43c9287f2",
+    "task11_parent_vectors": "b1d6612455ba573a612ee440bea2e08e3a7d89e54a6cc42b9ab91039d4279ef6",
+    "derived_document_vectors": "2657d4cd552e0f02d5bcc146f756c9ba9955b41960a09b0a7bf9683863458cac",
+    "doc_id_map": "b91664e26cbef164663450a496f5cc48a4fbdca183ad65bcc5ffe6e7d893844f",
+}
+
+
+def test_phase4e3_manifest_and_report_closure():
+    """Genuine-red closure for the Phase 4E3 manifest + report.
+
+    Neither the formal manifest nor the report is committed yet, so this node
+    must fail on their absence (no `.generated` fallback).  Once present, it
+    pins the frozen manifest lineage, title, notes, and byte-equal report
+    regeneration through the public build_report CLI.
+    """
+    missing = [p.name for p in (P4E3_MANIFEST, P4E3_REPORT) if not p.exists()]
+    if missing:
+        pytest.fail(f"formal phase4e3 deliverables missing: {sorted(missing)}")
+
+    manifest = json.loads(P4E3_MANIFEST.read_text(encoding="utf-8"))
+    results = json.loads(P4E3_RESULTS.read_text(encoding="utf-8"))
+    report = P4E3_REPORT.read_text(encoding="utf-8")
+
+    # Frozen manifest contract.
+    assert manifest["base_sha"] == "3040125e2fd93b4b270cefdde03d30cc3bfb637f"
+    assert manifest["implementation_sha"] == "c634b2d615f45048a1646729c1926e661c2c07e3"
+    assert manifest["result_file_sha256"] == P4E3_RESULTS_SHA
+    assert manifest["report_file_sha256"] == _sha256_bytes(report.encode("utf-8"))
+    assert manifest["report_title"] == P4E3_REPORT_TITLE
+    assert manifest["report_notes"] == P4E3_REPORT_NOTES
+    assert manifest["measurement_lineage"] == P4E3_MEASUREMENT_LINEAGE
+    assert manifest["dev_set"]["query_count"] == 72
+
+    # dev count/ids exactly 72 and disjoint from the 48 holdout ids.
+    dev, holdout = _p4e3_split_ids()
+    assert set(manifest["dev_set"]["query_ids"]) == dev
+    assert set(manifest["dev_set"]["query_ids"]).isdisjoint(holdout)
+
+    # Existing model/runner/schema/adapters identity is preserved.
+    assert manifest["model"]["identity"] == "voyageai/voyage-4-nano@67fabc9bef010dabc5f6024aa1b1b6b93410426f"
+    assert manifest["runner"]["name"] == "benchmark.product_eval.runner"
+    assert manifest["postprocess"]["name"] == "benchmark.product_eval.postprocess"
+    assert manifest["report_generator"]["name"] == "benchmark.product_eval.build_report"
+    assert manifest["schema"]["dataset_manifest_schema"] == "1"
+    assert "adapters_not_run" in manifest
+
+    # Byte-equal report regeneration via the public CLI seam.
+    out_report = Path(".") / f"phase4e3_report_regen_{hashlib.sha256(report.encode()).hexdigest()[:12]}.md"
+    try:
+        proc = subprocess.run(
+            [
+                sys.executable, "-m", "benchmark.product_eval.build_report",
+                "--results", str(P4E3_RESULTS),
+                "--manifest", str(P4E3_MANIFEST),
+                "--out", str(out_report),
+            ],
+            capture_output=True,
+            text=True,
+            cwd=REPO,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert out_report.read_text(encoding="utf-8") == report
+    finally:
+        if out_report.exists():
+            out_report.unlink()
+
+    # The three formal deliverables contain no content, keys, DSNs, or host
+    # paths; manifest/report contain no holdout ids.
+    for payload, label in ((results, "results"), (manifest, "manifest"), (report, "report")):
+        text = payload if isinstance(payload, str) else json.dumps(payload)
+        assert "postgresql://" not in text
+        assert "voyage_key" not in text
+        assert "AKIA" not in text
+        assert "/Users/" not in text and "benchmark/.generated" not in text
+    for qid in holdout:
+        assert qid not in json.dumps(manifest)
+        assert qid not in report
