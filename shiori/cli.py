@@ -43,6 +43,10 @@ def _build_parser() -> argparse.ArgumentParser:
     _config_args(query, suppress_default=True)
     query.add_argument("query", help="search query")
     query.add_argument("--limit", "-n", type=int, default=5)
+    query.add_argument("--source-type", action="append", default=[], help="Filter by exact source_type (repeatable)")
+    query.add_argument("--session-id", action="append", default=[], help="Filter by exact session_id (repeatable)")
+    query.add_argument("--time-from", default=None, help="UTC RFC3339 lower bound (inclusive on timestamp_start)")
+    query.add_argument("--time-to", default=None, help="UTC RFC3339 upper bound (exclusive on timestamp_start)")
 
     serve = sub.add_parser("serve", help="run the read-only MCP server")
     _config_args(serve, suppress_default=True)
@@ -135,6 +139,14 @@ def _run_query(args: argparse.Namespace, settings: Settings) -> int:
         query_args.extend(["--config", args.config])
     if args.legacy_openclaw:
         query_args.append("--legacy-openclaw")
+    for source in getattr(args, "source_type", []):
+        query_args.extend(["--source-type", source])
+    for session in getattr(args, "session_id", []):
+        query_args.extend(["--session-id", session])
+    if getattr(args, "time_from", None):
+        query_args.extend(["--time-from", args.time_from])
+    if getattr(args, "time_to", None):
+        query_args.extend(["--time-to", args.time_to])
     query.main(query_args)
     return 0
 
