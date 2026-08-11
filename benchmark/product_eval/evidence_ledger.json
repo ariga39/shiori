@@ -1,0 +1,1182 @@
+{
+ "q-0001": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 (freshness) is a later migration in the same db session; query asks for the manager-history migration"
+  }
+ },
+ "q-0002": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0010"
+   ],
+   "non_relevant_docs": [
+    "doc-0011"
+   ],
+   "why": "doc-0011 (provenance) is a later migration; query asks for the freshness column"
+  }
+ },
+ "q-0003": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0011"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 (freshness) is an earlier migration in the same session; query asks for provenance"
+  }
+ },
+ "q-0005": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0004"
+   ],
+   "non_relevant_docs": [
+    "doc-0005"
+   ],
+   "why": "doc-0005 is the zh translation of the storage fact; the en query targets doc-0004"
+  }
+ },
+ "q-0006": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0006"
+   ],
+   "non_relevant_docs": [
+    "doc-0007"
+   ],
+   "why": "doc-0007 is the zh MCP write-fact translation; the en query targets doc-0006"
+  }
+ },
+ "q-0007": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0022"
+   ],
+   "non_relevant_docs": [
+    "doc-0001"
+   ],
+   "why": "doc-0001 (build checks) shares the build session but does not mention the dependency cache"
+  }
+ },
+ "q-0008": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0001"
+   ],
+   "non_relevant_docs": [
+    "doc-0022"
+   ],
+   "why": "doc-0022 (dependency cache) shares the build session but does not list lint/typecheck/tests"
+  }
+ },
+ "q-0013": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0002"
+   ],
+   "non_relevant_docs": [
+    "doc-0001"
+   ],
+   "why": "doc-0001 is the en build doc; the zh query targets doc-0002"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 19
+  }
+ },
+ "q-0014": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0013"
+   ],
+   "non_relevant_docs": [
+    "doc-0012"
+   ],
+   "why": "doc-0012 is the en nav doc; the zh query targets doc-0013"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 15
+  }
+ },
+ "q-0015": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0007"
+   ],
+   "non_relevant_docs": [
+    "doc-0006"
+   ],
+   "why": "doc-0006 is the en MCP doc; the zh query targets doc-0007"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 14
+  }
+ },
+ "q-0016": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is a later migration; the paraphrase asks about the manager-history migration"
+  }
+ },
+ "q-0017": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0010"
+   ],
+   "non_relevant_docs": [
+    "doc-0011"
+   ],
+   "why": "doc-0011 is the later provenance migration; paraphrase asks for the freshness migration"
+  }
+ },
+ "q-0018": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0011"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is an earlier migration; paraphrase asks for provenance"
+  }
+ },
+ "q-0021": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0006"
+   ],
+   "non_relevant_docs": [
+    "doc-0007"
+   ],
+   "why": "doc-0007 is the zh MCP translation; the en paraphrase targets doc-0006"
+  }
+ },
+ "q-0022": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0022"
+   ],
+   "non_relevant_docs": [
+    "doc-0001"
+   ],
+   "why": "doc-0001 is about build checks, not the dependency cache"
+  }
+ },
+ "q-0028": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0002"
+   ],
+   "non_relevant_docs": [
+    "doc-0001"
+   ],
+   "why": "doc-0001 is the en build doc; the zh paraphrase targets doc-0002"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 21
+  }
+ },
+ "q-0030": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0007"
+   ],
+   "non_relevant_docs": [
+    "doc-0006"
+   ],
+   "why": "doc-0006 is the en MCP doc; the zh paraphrase targets doc-0007"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 12
+  }
+ },
+ "q-0031": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0002"
+   ],
+   "non_relevant_docs": [
+    "doc-0001"
+   ],
+   "why": "doc-0001 is the en build doc; the zh multilingual query targets doc-0002"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 18
+  }
+ },
+ "q-0034": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0008"
+   ],
+   "non_relevant_docs": [
+    "doc-0007"
+   ],
+   "why": "doc-0007 is the zh MCP read-only doc; the ja query targets doc-0008"
+  }
+ },
+ "q-0035": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is the later freshness migration; the query asks for the manager-history migration"
+  }
+ },
+ "q-0036": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0010"
+   ],
+   "non_relevant_docs": [
+    "doc-0011"
+   ],
+   "why": "doc-0011 is the later provenance migration; query asks for freshness"
+  }
+ },
+ "q-0043": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0008"
+   ],
+   "non_relevant_docs": [
+    "doc-0007"
+   ],
+   "why": "doc-0007 is the zh read-only doc; the ja query asks whether the MCP server writes"
+  }
+ },
+ "q-0053": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0011"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is an earlier migration; query asks for the MOST RECENT nav-pipeline addition"
+  }
+ },
+ "q-0054": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is a later migration; query asks for the EARLIEST migration"
+  }
+ },
+ "q-0063": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0011"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is an earlier migration; zh query asks for the latest one"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 8
+  }
+ },
+ "q-0066": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is a later migration; multi-turn asks about the manager-history table"
+  }
+ },
+ "q-0067": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009",
+    "doc-0010"
+   ],
+   "non_relevant_docs": [
+    "doc-0011"
+   ],
+   "why": "doc-0011 (provenance) came after; multi-turn asks whether manager history came before freshness"
+  },
+  "same_name": {
+   "entity": "nav-snapshot-migration",
+   "docs": [
+    "doc-0009",
+    "doc-0010"
+   ],
+   "why": "both db docs are nav-snapshot migrations"
+  }
+ },
+ "q-0068": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0011"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is earlier; multi-turn asks what the LATER migration added"
+  }
+ },
+ "q-0081": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 is a later migration; duplicate query asks for the manager-history migration"
+  }
+ },
+ "q-0082": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0010"
+   ],
+   "non_relevant_docs": [
+    "doc-0011"
+   ],
+   "why": "doc-0011 is a later migration; duplicate query asks for the freshness migration"
+  }
+ },
+ "q-0111": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0001"
+   ],
+   "non_relevant_docs": [
+    "doc-0022"
+   ],
+   "why": "doc-0022 (dependency cache) shares the build session but is not about per-PR checks"
+  },
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-build",
+   "why": "session filter: relevant docs live in corpus session bench-build"
+  }
+ },
+ "q-0113": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0009"
+   ],
+   "non_relevant_docs": [
+    "doc-0010"
+   ],
+   "why": "doc-0010 (freshness) is a later db migration; filtered query targets the manager-history migration"
+  },
+  "source_filter": {
+   "kind": "synthetic-log",
+   "why": "source-kind filter: relevant docs are ['synthetic-log']"
+  },
+  "session_filter": {
+   "session": "bench-db",
+   "why": "session filter: relevant docs live in corpus session bench-db"
+  }
+ },
+ "q-0115": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0006"
+   ],
+   "non_relevant_docs": [
+    "doc-0007"
+   ],
+   "why": "doc-0007 is the zh MCP translation; filtered en query targets doc-0006"
+  },
+  "source_filter": {
+   "kind": "synthetic-faq",
+   "why": "source-kind filter: relevant docs are ['synthetic-faq']"
+  },
+  "session_filter": {
+   "session": "bench-mcp",
+   "why": "session filter: relevant docs live in corpus session bench-mcp"
+  }
+ },
+ "q-0116": {
+  "hard_negative": {
+   "relevant_docs": [
+    "doc-0017",
+    "doc-0018",
+    "doc-0021"
+   ],
+   "non_relevant_docs": [
+    "doc-0019"
+   ],
+   "why": "doc-0019 is the zh deploy translation; filtered en query targets the en policy docs"
+  },
+  "same_name": {
+   "entity": "verified-release",
+   "docs": [
+    "doc-0017",
+    "doc-0018",
+    "doc-0021"
+   ],
+   "why": "verified-release entity in deploy docs"
+  },
+  "source_filter": {
+   "kind": "synthetic-faq",
+   "why": "source-kind filter: relevant docs are ['synthetic-faq', 'synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-deploy",
+   "why": "session filter: relevant docs live in corpus session bench-deploy"
+  },
+  "time_filter": {
+   "operator": "before",
+   "iso_bound": "2026-08-09T00:00:00Z",
+   "eligible_docs": [
+    "doc-0001",
+    "doc-0002",
+    "doc-0003",
+    "doc-0004",
+    "doc-0005",
+    "doc-0006",
+    "doc-0007",
+    "doc-0008",
+    "doc-0009",
+    "doc-0010",
+    "doc-0011",
+    "doc-0012",
+    "doc-0013",
+    "doc-0014",
+    "doc-0015",
+    "doc-0016",
+    "doc-0017",
+    "doc-0018",
+    "doc-0019"
+   ],
+   "why": "time filter: eligible docs are those before 2026-08-09T00:00:00Z"
+  }
+ },
+ "q-0019": {
+  "cross_session": {
+   "docs": [
+    "doc-0009",
+    "doc-0012"
+   ],
+   "why": "the manager-history migration lives in bench-db (doc-0009) while nav persistence is in bench-nav (doc-0012); the answer needs both"
+  }
+ },
+ "q-0020": {
+  "cross_session": {
+   "docs": [
+    "doc-0004",
+    "doc-0006"
+   ],
+   "why": "the embedding dimension is in bench-store (doc-0004) and the MCP read-only fact in bench-mcp (doc-0006)"
+  }
+ },
+ "q-0023": {
+  "cross_session": {
+   "docs": [
+    "doc-0001",
+    "doc-0020"
+   ],
+   "why": "build checks are in bench-build (doc-0001) and onboarding in bench-ops (doc-0020)"
+  }
+ },
+ "q-0024": {
+  "cross_session": {
+   "docs": [
+    "doc-0011",
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the latest migration is in bench-db (doc-0011) and the report deadline in bench-plan (doc-0015/doc-0016)"
+  },
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the report due date changed across doc-0015 and doc-0016"
+  },
+  "same_name": {
+   "entity": "migration",
+   "docs": [
+    "doc-0011",
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the query names the migration entity (doc-0011) alongside the deadline entity"
+  }
+ },
+ "q-0026": {
+  "cross_session": {
+   "docs": [
+    "doc-0004",
+    "doc-0014"
+   ],
+   "why": "embedding storage is in bench-store (doc-0004) and exact-substring matching in bench-search (doc-0014)"
+  }
+ },
+ "q-0027": {
+  "cross_session": {
+   "docs": [
+    "doc-0017",
+    "doc-0022"
+   ],
+   "why": "the verified-release policy is in bench-deploy (doc-0017) and the dependency-tree cache in bench-build (doc-0022)"
+  }
+ },
+ "q-0041": {
+  "cross_session": {
+   "docs": [
+    "doc-0017",
+    "doc-0022"
+   ],
+   "why": "the staging policy is in bench-deploy (doc-0017) and the build-server cache in bench-build (doc-0022)"
+  }
+ },
+ "q-0057": {
+  "cross_session": {
+   "docs": [
+    "doc-0011",
+    "doc-0012"
+   ],
+   "why": "the latest migration is in bench-db (doc-0011) and nav persistence in bench-nav (doc-0012)"
+  },
+  "knowledge_update": {
+   "docs": [
+    "doc-0011",
+    "doc-0012"
+   ],
+   "why": "the nav pipeline changed: latest migration (doc-0011) + how quotes are now persisted (doc-0012)"
+  },
+  "same_name": {
+   "entity": "nav-snapshot-migration",
+   "docs": [
+    "doc-0011",
+    "doc-0012"
+   ],
+   "why": "the latest migration (doc-0011) plus nav persistence (doc-0012) reference the nav-snapshot pipeline"
+  }
+ },
+ "q-0071": {
+  "cross_session": {
+   "docs": [
+    "doc-0004",
+    "doc-0010"
+   ],
+   "why": "the embedding dimension is in bench-store (doc-0004) and the freshness migration in bench-db (doc-0010)"
+  },
+  "same_name": {
+   "entity": "nav-snapshot-migration",
+   "docs": [
+    "doc-0004",
+    "doc-0010"
+   ],
+   "why": "the freshness migration (doc-0010) and the stored dimension (doc-0004) both concern the nav snapshot pipeline"
+  }
+ },
+ "q-0073": {
+  "cross_session": {
+   "docs": [
+    "doc-0017",
+    "doc-0020",
+    "doc-0021"
+   ],
+   "why": "the verified-release policy (bench-deploy docs) plus the onboarding checklist (bench-ops doc-0020)"
+  },
+  "same_name": {
+   "entity": "verified-release",
+   "docs": [
+    "doc-0017",
+    "doc-0020",
+    "doc-0021"
+   ],
+   "why": "verified-release entity across deploy docs plus the onboarding checklist"
+  }
+ },
+ "q-0009": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the deadline moved from end-of-August (doc-0015) to last-working-day-of-August (doc-0016); the answer is the UPDATED value"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "both plan docs refer to the quarterly report deadline entity"
+  }
+ },
+ "q-0046": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the zh query asks when the deadline was moved to; doc-0016 is the update"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "zh query targeting the deadline entity"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0050": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the deadline is now the last working day of August, replacing the earlier stated deadline"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity in both plan docs"
+  }
+ },
+ "q-0055": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the deadline moved from when to when: doc-0015 -> doc-0016"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  }
+ },
+ "q-0056": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the deadline moved from when to when: doc-0015 -> doc-0016"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  }
+ },
+ "q-0058": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0010",
+    "doc-0011"
+   ],
+   "why": "the nav pipeline changed: before provenance (doc-0010) vs after (doc-0011)"
+  },
+  "same_name": {
+   "entity": "nav-snapshot-migration",
+   "docs": [
+    "doc-0010",
+    "doc-0011"
+   ],
+   "why": "both db docs describe nav-snapshot migrations"
+  }
+ },
+ "q-0061": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the zh temporal query asks the deadline change window"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 20
+  }
+ },
+ "q-0074": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the multi-turn deadline question relies on the updated value in doc-0016 vs the earlier doc-0015"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  }
+ },
+ "q-0077": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the zh multi-turn deadline question needs the updated value"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  }
+ },
+ "q-0087": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the duplicate deadline query needs the updated due date"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  },
+  "duplicate_groups": {
+   "groups": [
+    [
+     "doc-0015",
+     "doc-0016"
+    ]
+   ],
+   "why": "authored near-duplicate result groups (>=2 members, non-overlapping) for duplicate-rate evaluation"
+  }
+ },
+ "q-0117": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the filtered deadline query needs the updated due date"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  },
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-plan",
+   "why": "session filter: relevant docs live in corpus session bench-plan"
+  },
+  "time_filter": {
+   "operator": "at",
+   "iso_bound": "2026-08-07T09:00:00Z",
+   "eligible_docs": [
+    "doc-0016"
+   ],
+   "why": "time filter: eligible docs are those at 2026-08-07T09:00:00Z"
+  }
+ },
+ "q-0122": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the filtered zh deadline query needs the updated value"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  },
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-plan",
+   "why": "session filter: relevant docs live in corpus session bench-plan"
+  },
+  "time_filter": {
+   "operator": "at",
+   "iso_bound": "2026-08-07T09:00:00Z",
+   "eligible_docs": [
+    "doc-0016"
+   ],
+   "why": "time filter: eligible docs are those at 2026-08-07T09:00:00Z"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0124": {
+  "knowledge_update": {
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "the filtered zh deadline query needs the updated value"
+  },
+  "same_name": {
+   "entity": "quarterly-report-deadline",
+   "docs": [
+    "doc-0015",
+    "doc-0016"
+   ],
+   "why": "deadline entity"
+  },
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-plan",
+   "why": "session filter: relevant docs live in corpus session bench-plan"
+  },
+  "time_filter": {
+   "operator": "at",
+   "iso_bound": "2026-08-07T09:00:00Z",
+   "eligible_docs": [
+    "doc-0016"
+   ],
+   "why": "time filter: eligible docs are those at 2026-08-07T09:00:00Z"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 10
+  }
+ },
+ "q-0012": {
+  "same_name": {
+   "entity": "verified-release",
+   "docs": [
+    "doc-0017",
+    "doc-0018",
+    "doc-0021"
+   ],
+   "why": "all deploy docs describe the verified-release policy entity"
+  }
+ },
+ "q-0052": {
+  "same_name": {
+   "entity": "nav-snapshot-migration",
+   "docs": [
+    "doc-0009",
+    "doc-0010"
+   ],
+   "why": "both db docs describe nav-snapshot migrations"
+  }
+ },
+ "q-0112": {
+  "source_filter": {
+   "kind": "synthetic-faq",
+   "why": "source-kind filter: relevant docs are ['synthetic-faq']"
+  },
+  "session_filter": {
+   "session": "bench-build",
+   "why": "session filter: relevant docs live in corpus session bench-build"
+  }
+ },
+ "q-0114": {
+  "source_filter": {
+   "kind": "synthetic-log",
+   "why": "source-kind filter: relevant docs are ['synthetic-log']"
+  },
+  "session_filter": {
+   "session": "bench-db",
+   "why": "session filter: relevant docs live in corpus session bench-db"
+  },
+  "time_filter": {
+   "operator": "before",
+   "iso_bound": "2026-08-01T00:00:00Z",
+   "eligible_docs": [
+    "doc-0009",
+    "doc-0010",
+    "doc-0011"
+   ],
+   "why": "time filter: eligible docs are those before 2026-08-01T00:00:00Z"
+  }
+ },
+ "q-0118": {
+  "source_filter": {
+   "kind": "synthetic-faq",
+   "why": "source-kind filter: relevant docs are ['synthetic-faq']"
+  },
+  "session_filter": {
+   "session": "bench-ops",
+   "why": "session filter: relevant docs live in corpus session bench-ops"
+  }
+ },
+ "q-0119": {
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-build",
+   "why": "session filter: relevant docs live in corpus session bench-build"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 19
+  }
+ },
+ "q-0120": {
+  "source_filter": {
+   "kind": "synthetic-faq",
+   "why": "source-kind filter: relevant docs are ['synthetic-faq']"
+  },
+  "session_filter": {
+   "session": "bench-mcp",
+   "why": "session filter: relevant docs live in corpus session bench-mcp"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 12
+  }
+ },
+ "q-0121": {
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-nav",
+   "why": "session filter: relevant docs live in corpus session bench-nav"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 8
+  }
+ },
+ "q-0123": {
+  "source_filter": {
+   "kind": "synthetic-log",
+   "why": "source-kind filter: relevant docs are ['synthetic-log']"
+  },
+  "session_filter": {
+   "session": "bench-db",
+   "why": "session filter: relevant docs live in corpus session bench-db"
+  },
+  "time_filter": {
+   "operator": "before",
+   "iso_bound": "2026-08-01T00:00:00Z",
+   "eligible_docs": [
+    "doc-0009",
+    "doc-0010",
+    "doc-0011"
+   ],
+   "why": "time filter: eligible docs are those before 2026-08-01T00:00:00Z"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 11
+  }
+ },
+ "q-0125": {
+  "source_filter": {
+   "kind": "synthetic-note",
+   "why": "source-kind filter: relevant docs are ['synthetic-note']"
+  },
+  "session_filter": {
+   "session": "bench-deploy",
+   "why": "session filter: relevant docs live in corpus session bench-deploy"
+  },
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0029": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 19
+  }
+ },
+ "q-0033": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 8
+  }
+ },
+ "q-0037": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 16
+  }
+ },
+ "q-0040": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 16
+  }
+ },
+ "q-0042": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 14
+  }
+ },
+ "q-0062": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0064": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0065": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0089": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 19
+  }
+ },
+ "q-0090": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 15
+  }
+ },
+ "q-0106": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 16
+  }
+ },
+ "q-0107": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 10
+  }
+ },
+ "q-0108": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 11
+  }
+ },
+ "q-0109": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 13
+  }
+ },
+ "q-0110": {
+  "long_chinese": {
+   "why": "zh query with substantial CJK text",
+   "cjk_chars": 12
+  }
+ },
+ "q-0083": {},
+ "q-0084": {
+  "duplicate_groups": {
+   "groups": [
+    [
+     "doc-0006",
+     "doc-0007"
+    ]
+   ],
+   "why": "authored near-duplicate result groups (>=2 members, non-overlapping) for duplicate-rate evaluation"
+  }
+ },
+ "q-0085": {
+  "duplicate_groups": {
+   "groups": [
+    [
+     "doc-0001",
+     "doc-0002"
+    ]
+   ],
+   "why": "authored near-duplicate result groups (>=2 members, non-overlapping) for duplicate-rate evaluation"
+  }
+ },
+ "q-0086": {
+  "duplicate_groups": {
+   "groups": [
+    [
+     "doc-0017",
+     "doc-0018"
+    ]
+   ],
+   "why": "authored near-duplicate result groups (>=2 members, non-overlapping) for duplicate-rate evaluation"
+  }
+ },
+ "q-0088": {}
+}
