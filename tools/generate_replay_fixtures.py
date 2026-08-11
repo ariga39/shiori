@@ -45,8 +45,8 @@ def stable_text_hash(text: str) -> str:
 
 
 def model_identity_fingerprint(model_id: str, model_revision: str) -> str:
-    """Short fingerprint binding the exact model id + pinned revision."""
-    return hashlib.sha256(f"{model_id}|{model_revision}".encode()).hexdigest()[:16]
+    """Full SHA-256 fingerprint binding the exact model id + pinned revision."""
+    return hashlib.sha256(f"{model_id}|{model_revision}".encode()).hexdigest()
 
 
 def composite_key(model_id: str, model_revision: str, input_type: str, text: str) -> str:

@@ -22,7 +22,7 @@
     "document_prompt": "Represent the document for retrieval:",
     "dtype": "float32",
     "id": "voyage-4-nano",
-    "key_identity": "0d1bcc385afad0d4",
+    "key_identity": "0d1bcc385afad0d44e0056114bc8e9b7b64bc4c9c6065156023fbd29e3d1f056",
     "normalized": true,
     "query_prompt": "Represent the query for retrieving supporting documents:",
     "revision": "voyageai/voyage-4-nano@main"
@@ -37,6 +37,6 @@
   "vectors": {
     "count": 10,
     "key_format": "model_identity_fingerprint:input_type:sha256(text)",
-    "sha256": "379a993ac51fae8eb04f12748790e3a3cac93ed268c600e9dd95503ec6dab1c0"
+    "sha256": "fe0fb3f0ba4de81c58dd0f9b12852145cca4897bc46e87d43f31aa13267b8099"
   }
 }

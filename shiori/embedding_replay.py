@@ -36,6 +36,25 @@ class ReplayError(ValueError):
         self.code = code
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``json.loads`` object_pairs_hook that fails closed on duplicate keys.
+
+    Python's default ``json.loads`` silently keeps the LAST value for a repeated
+    object key, so a vectors fixture with a duplicated key would be consumed as
+    if it were a single entry.  This hook rejects any repeated key during parse,
+    before any validation, so the fixture cannot hide a real duplicate.
+    """
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ReplayError(
+                f"replay vector fixture contains a duplicate key: {key!r}",
+                code="replay_vectors_duplicate_key",
+            )
+        result[key] = value
+    return result
+
+
 @dataclass(frozen=True)
 class ReplayManifest:
     """Validated metadata describing one versioned vector fixture."""
@@ -68,13 +87,15 @@ def stable_text_hash(text: str) -> str:
 
 
 def model_identity_fingerprint(model_id: str, model_revision: str) -> str:
-    """Return a stable short fingerprint binding the exact model identity.
+    """Return the full SHA-256 fingerprint binding the exact model identity.
 
-    The fingerprint is derived from the declared model id + revision so a
+    The fingerprint is the complete digest of ``model_id|model_revision``, so a
     fixture produced by a different model (or a different pinned revision)
-    cannot collide with, or silently satisfy, this fixture's lookup keys.
+    cannot collide with, or silently satisfy, this fixture's lookup keys.  The
+    full 64-hex digest avoids the unnecessary 64-bit truncation collision
+    surface of a shortened prefix.
     """
-    return hashlib.sha256(f"{model_id}|{model_revision}".encode()).hexdigest()[:16]
+    return hashlib.sha256(f"{model_id}|{model_revision}".encode()).hexdigest()
 
 
 def composite_key(model_id: str, model_revision: str, input_type: str, text: str) -> str:
@@ -212,7 +233,12 @@ class ReplayEmbedder:
                 code="replay_manifest_hash_mismatch",
             )
         try:
-            vectors = json.loads(vectors_path.read_text(encoding="utf-8"))
+            vectors = json.loads(
+                vectors_path.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_keys,
+            )
+        except ReplayError:
+            raise
         except OSError as exc:
             raise ReplayError("replay vector fixture cannot be read", code="replay_vectors_unreadable") from exc
         except json.JSONDecodeError as exc:

@@ -20,6 +20,7 @@ from shiori.embedding_replay import (
     composite_key,
     load_manifest,
     model_identity_fingerprint,
+    stable_text_hash,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -130,23 +131,33 @@ def test_replay_manifest_hash_mismatch_fails_closed(tmp_path: Path) -> None:
 
 
 def test_replay_duplicate_key_fails_closed(tmp_path: Path) -> None:
+    """A raw JSON vectors file with a repeated object key must fail closed at
+    parse time with ``replay_vectors_duplicate_key``.  Python's default
+    ``json.loads`` silently keeps the last value, so the file is written by hand
+    (raw text) to prove the parse-time object_pairs_hook rejects the duplicate
+    before any validation."""
     manifest_data = json.loads(MANIFEST.read_text(encoding="utf-8"))
     from shiori.embedding_replay import file_sha256
 
-    vectors_data = json.loads(VECTORS.read_text(encoding="utf-8"))
-    first_key = next(iter(vectors_data))
-    vectors_data[first_key + "_copy"] = vectors_data[first_key]
-    vectors_data[first_key] = [0.0] * 1024
-    # duplicate keys via same key twice is impossible in a dict; instead
-    # force a count mismatch by claiming one more than present.
-    manifest_data["vectors"]["count"] = len(vectors_data) + 1
+    text = _read_texts(CORPUS)[0]
+    key = composite_key(MODEL_ID, MODEL_REVISION, "document", text)
+    vector = json.loads(VECTORS.read_text(encoding="utf-8"))[key]
+    from shiori.embedding_replay import model_identity_fingerprint
+
+    fp = model_identity_fingerprint(MODEL_ID, MODEL_REVISION)
+    # Handwrite the same key twice in the raw JSON body.
+    one = json.dumps(vector)
+    raw = f'{{"{fp}:document:{stable_text_hash(text)}":{one},"{fp}:document:{stable_text_hash(text)}":{one}}}'
+    vectors_path = tmp_path / "vectors.json"
+    vectors_path.write_text(raw, encoding="utf-8")
     manifest_data["vectors"]["sha256"] = "x" * 64
-    manifest_path, vectors_path = _write(tmp_path, manifest_data, vectors_data)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
     manifest_data["vectors"]["sha256"] = file_sha256(vectors_path)
     manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
     with pytest.raises(ReplayError) as exc:
         ReplayEmbedder.from_files(manifest_path, vectors_path)
-    assert exc.value.code == "replay_vectors_invalid"
+    assert exc.value.code == "replay_vectors_duplicate_key"
 
 
 def test_replay_dimension_mismatch_fails_closed(tmp_path: Path) -> None:
