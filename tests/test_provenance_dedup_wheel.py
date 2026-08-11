@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -28,6 +29,29 @@ EMBED_DIM = 1024
 A = "[user] The deadline for the quarterly report was moved to the end of August."
 B = "[user] The quarterly report deadline is now the last working day of August."
 QUERY = "when is the quarterly report deadline?"
+
+
+def test_wheel_build_backend_is_locked_for_offline_ci():
+    """The offline wheel harness needs the setuptools build backend available
+    from the shared uv cache.  This is a packaging contract: the frozen
+    `[build-system].requires` must also appear in the locked `dev` extra, and
+    `uv.lock` must contain a single setuptools package in `>=75,<80` with
+    verifiable artifact hashes.  Expected values are frozen config literals;
+    no resolver runs and no private helper is tested."""
+    with (ROOT / "pyproject.toml").open("rb") as fh:
+        pyproject = tomllib.load(fh)
+
+    assert pyproject["build-system"]["requires"] == ["setuptools>=75,<80"]
+    dev = pyproject["project"]["optional-dependencies"]["dev"]
+    assert "setuptools>=75,<80" in dev
+
+    with (ROOT / "uv.lock").open("rb") as fh:
+        lock = tomllib.load(fh)
+    setuptools = [p for p in lock["package"] if p.get("name") == "setuptools"]
+    assert len(setuptools) == 1, f"expected exactly one setuptools package, got {len(setuptools)}"
+    pkg = setuptools[0]
+    assert "75.0.0" <= pkg["version"] < "80.0.0", f"setuptools version out of range: {pkg['version']}"
+    assert "sdist" in pkg and "hash" in pkg["sdist"], "setuptools lock entry must have a verifiable sdist hash"
 
 
 @pytest.fixture(scope="module")
