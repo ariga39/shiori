@@ -72,11 +72,17 @@ def installed_wheel(uv: str, tmp_path_factory) -> Path:
     tmp_path = tmp_path_factory.mktemp("wheel")
     dist = tmp_path / "dist"
     dist.mkdir()
-    # --offline forces no network access; build isolation is kept because the
-    # build backend (setuptools>=75) is not importable in the parent
-    # interpreter for --no-build-isolation, and the offline cache already
-    # satisfies the isolation backend without any index access.
-    _run(uv, "build", "--offline", "--out-dir", str(dist), str(ROOT), cwd=ROOT)
+    # Build in a dedicated venv with the pyproject-pinned backend installed
+    # offline from the local cache, so the build runs with
+    # --no-build-isolation under a hard offline gate (no index/network).
+    build_venv = tmp_path / "build-venv"
+    _run(uv, "venv", "--python", str(sys.executable), str(build_venv))
+    install_env = {"UV_OFFLINE": "1", "PIP_NO_INDEX": "1"}
+    _run(uv, "pip", "install", "--offline", "--python", str(build_venv / "bin" / "python"),
+         "setuptools>=75,<80", env=install_env)
+    _run(uv, "build", "--offline", "--no-build-isolation",
+         "--python", str(build_venv / "bin" / "python"),
+         "--out-dir", str(dist), str(ROOT), cwd=ROOT)
     wheels = list(dist.glob("*.whl"))
     assert wheels, "uv build produced no wheel"
     wheel = max(wheels, key=lambda p: p.stat().st_size)
