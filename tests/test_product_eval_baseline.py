@@ -379,7 +379,7 @@ def test_phase4e3_results_and_dedup_contract():
     # Recovered distinct evidence (from the public sanitized +dedup trace).
     dedup_trace = results["traces"]["+dedup"]
     recovered = {
-        (qid, doc)
+        (qid, e["doc_id"])
         for qid, evs in dedup_trace.items()
         for e in evs
         if e.get("reason") == "mmr_keep"
@@ -397,7 +397,7 @@ def test_phase4e3_results_and_dedup_contract():
 
     # True duplicates still fold, with the byte-identical representative kept.
     dropped = {
-        (qid, doc)
+        (qid, e["doc_id"])
         for qid, evs in dedup_trace.items()
         for e in evs
         if e.get("reason") == "mmr_dedup"
