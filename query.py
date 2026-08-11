@@ -9,6 +9,7 @@ Usage: python3 query.py "search query" [--limit N] [--offset N]
 import argparse
 import re
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
@@ -692,6 +693,57 @@ def _coerce_filters(filters: SearchFilters | None) -> SearchFilters:
     return filters
 
 
+# Phase 4E2 recency grammar: a standalone English ``latest`` token, a leading
+# CJK/JP prefix (``最新``/``直近``, after NFKC, ignoring leading whitespace), or
+# a relative ``last <1..365> day|days`` sequence is explicit "prefer the
+# newest/recent" intent; the explicit veto ``not latest`` / ``not the latest``
+# conservatively disables text recency intent.  Matching is NFKC+casefold then
+# token-boundary regexes so ``latestness``/``mylatest``/``latest_2``/``last
+# 0 days``/``last 366 days`` do not hit.  Small and documented.
+_NOT_LATEST_TOKEN_RE = re.compile(r"(?<!\w)not\s+(?:the\s+)?latest(?!\w)")
+_LATEST_TOKEN_RE = re.compile(r"(?<!\w)latest(?!\w)")
+_RELATIVE_DAYS_RE = re.compile(r"(?<!\w)last\s+([0-9]{1,3})\s+days?(?!\w)")
+_RELATIVE_CN_DAYS_RE = re.compile(r"^过去\s*([0-9]{1,3})\s*天")
+_RELATIVE_JA_DAYS_RE = re.compile(r"^過去\s*([0-9]{1,3})\s*日")
+
+
+def _has_recency_intent(query_text: str) -> bool:
+    """True when the query text expresses explicit recency intent."""
+    folded = unicodedata.normalize("NFKC", query_text).casefold()
+    if _NOT_LATEST_TOKEN_RE.search(folded) is not None:
+        # Explicit veto: ``not latest``/``not the latest`` conservatively means
+        # no recency intent.
+        return False
+    if _LATEST_TOKEN_RE.search(folded) is not None:
+        return True
+    # Japanese negated-prefix veto: ``最新ではない``/``直近ではない`` at the
+    # start of the lstrip'd text conservatively means no recency intent.  This
+    # must precede the positive CJK prefix check.
+    stripped = folded.lstrip()
+    if stripped.startswith(("最新ではない", "直近ではない")):
+        return False
+    # CJK/JP prefix operators: ``最新``/``直近`` after leading whitespace are
+    # explicit "prefer the newest/recent" (documented prefix grammar, not
+    # arbitrary scanning).
+    if stripped.startswith(("最新", "直近")):
+        return True
+    # Relative days: ``last N day|days`` with 1 <= N <= 365.
+    m = _RELATIVE_DAYS_RE.search(folded)
+    if m is not None:
+        n = int(m.group(1))
+        if 1 <= n <= 365:
+            return True
+    # Chinese/Japanese relative days, anchored at the start of the (lstrip'd)
+    # folded text: ``过去 <1..365> 天`` / ``過去 <1..365> 日``.
+    for rel_re in (_RELATIVE_CN_DAYS_RE, _RELATIVE_JA_DAYS_RE):
+        m = rel_re.match(stripped)
+        if m is not None:
+            n = int(m.group(1))
+            if 1 <= n <= 365:
+                return True
+    return False
+
+
 def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | None = None):
     query = _validate_query_text(query)
     limit, offset = _normalise_search_args(limit, offset)
@@ -1036,8 +1088,18 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
     )
 
     # Temporal decay --------------------------------------------------------
+    # Phase 4E2: temporal decay applies ONLY under explicit temporal intent —
+    # structured time bounds on SearchFilters, or a recognized recency-intent
+    # token in the query text (grammar slice 1: standalone ``latest``).  An
+    # ordinary fact/history query without either must not decay, so
+    # older-but-more-relevant results are not penalized by age alone.
+    # Formula/half-life/score are unchanged.
     _temporal_s = 0.0
-    if config.temporal:
+    _explicit_time_intent = filters is not None and (
+        filters.time_from is not None or filters.time_to is not None
+    )
+    _recency_intent = _has_recency_intent(query)
+    if config.temporal and (_explicit_time_intent or _recency_intent):
         _t6 = time.perf_counter()
         for rid in scores:
             content, ts, sid, stype, emb_str, created_at, model, dimension = meta[rid]
@@ -1053,10 +1115,11 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
         _temporal_s = time.perf_counter() - _t6
 
     # Phase 4D trace: temporal decay stage (post-decay, pre-sort). Disabled
-    # emits only a stage_disabled summary (no decay applied). Rank by
-    # descending score. Allowlist only.
+    # (config.temporal off, or no explicit time intent under Phase 4E2) emits
+    # only a stage_disabled summary (no decay applied). Rank by descending
+    # score. Allowlist only.
     temporal_ranked = sorted(scores, key=lambda rid: (-scores[rid], str(rid)))
-    if config.temporal:
+    if config.temporal and (_explicit_time_intent or _recency_intent):
         temporal_events = [
             {
                 "doc_id": rid,
@@ -1068,9 +1131,11 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
             }
             for rank, rid in enumerate(temporal_ranked, start=1)
         ]
+        _temporal_stage = "stage"
     else:
         temporal_events = []
-    _emit_eval("temporal", temporal_events + [{"latency_ms": _temporal_s * 1000.0, "reason": "stage" if config.temporal else "stage_disabled"}])
+        _temporal_stage = "stage_disabled"
+    _emit_eval("temporal", temporal_events + [{"latency_ms": _temporal_s * 1000.0, "reason": _temporal_stage}])
 
     # Sort by decayed RRF score --------------------------------------------
     ranked = sorted(scores.keys(), key=lambda rid: (-scores[rid], str(rid)))

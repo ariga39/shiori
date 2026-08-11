@@ -86,7 +86,14 @@ def test_null_ts_decay_discriminates_by_stored_mtime(db, monkeypatch):
     _insert_fallback(conn, recent_sid, "shiori_nts_recent_x", FAR_EMB, now)
     _insert_fallback(conn, old_sid, "shiori_nts_old_x", QUERY_EMB, now - timedelta(days=120))
 
-    res = query.search("zzqx no-bm25-match 9", limit=300)
+    # Explicit temporal intent (Phase 4E2): structured time bounds covering
+    # both rows keep the original mtime-driven decay active.
+    from query import SearchFilters
+
+    filters = SearchFilters.from_inputs(
+        session_ids=[recent_sid, old_sid], time_from=(now - timedelta(days=121))
+    )
+    res = query.search("zzqx no-bm25-match 9", limit=300, filters=filters)
     mine = [r for r in res if r[3] in (recent_sid, old_sid)]
     assert len(mine) == 2
     contents = [r[0] for r in mine]
