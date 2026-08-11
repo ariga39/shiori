@@ -1,17 +1,18 @@
-"""Phase 4E1 filter_eval contract tests (v3).
+"""Phase 4E1 filter_eval contract tests (v4).
 
 Verifies the dev-only measurement outputs are deterministic and sanitized: no
 holdout IDs, no raw session/source values, no content/path/DSN/key, the report
-is machine-generated from the JSON, and the v3 field set (harness/implementation
-SHA, embedding_mode, input hashes, per-kind leakage counts, latency with reps,
-unfiltered base-vs-head regression, before/after/subsequence) is fully covered
-and recomputable.
+is machine-generated from the JSON, and the v4 field set (runtime-verified
+harness SHA, embedding_mode, input hashes, per-kind leakage counts reconciled
+to 9/9/3 before / 0/0/0 after, aggregate latency over raw samples, unfiltered
+base-vs-head regression) is fully covered and recomputable.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -80,15 +81,27 @@ def _holdout_ids() -> set[str]:
     return {q["query_id"] for q in manifest["query_splits"] if q["split"] == "holdout"}
 
 
+def _runtime_head() -> str:
+    out = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
 def test_filter_eval_results_shape_and_no_holdout():
     if not RESULTS.exists():
         pytest.skip("filter_eval results not generated in this checkout")
     results = json.loads(RESULTS.read_text(encoding="utf-8"))
     assert set(results) == ALLOWED_RESULT_KEYS
-    assert results["schema"] == "shiori-filter-eval/v3"
+    assert results["schema"] == "shiori-filter-eval/v4"
     assert results["holdout_ids_used"] == []
     assert results["embedding_mode"] == "pinned_local_replay"
-    assert isinstance(results["harness_sha"], str) and len(results["harness_sha"]) == 40
+    # harness_sha must equal the runtime exact HEAD (evidence binding).
+    assert results["harness_sha"] == _runtime_head()
+    assert len(results["harness_sha"]) == 40
     assert isinstance(results["implementation_sha"], str)
     assert set(results["input_hashes"]) == ALLOWED_INPUT_HASH_KEYS
     assert all(re.fullmatch(r"[0-9a-f]{64}", h) for h in results["input_hashes"].values())
@@ -109,6 +122,15 @@ def test_filter_eval_results_shape_and_no_holdout():
         assert case["filtered_latency_ms"]["sample_count"] >= 10
 
 
+def test_harness_sha_mismatch_fails_closed():
+    """Passing a --harness-sha that differs from `git rev-parse HEAD` must fail
+    closed before any measurement work."""
+    from benchmark.product_eval import filter_eval
+
+    with pytest.raises(filter_eval.FilterEvalError, match="does not match runtime HEAD"):
+        filter_eval.main(["--dsn", "unused", "--harness-sha", "0" * 40])
+
+
 def test_filter_eval_after_is_zero_and_subsequence_holds():
     if not RESULTS.exists():
         pytest.skip("filter_eval results not generated in this checkout")
@@ -124,20 +146,19 @@ def test_filter_eval_after_is_zero_and_subsequence_holds():
 
 
 def test_filter_eval_before_matches_frozen_phase4d_evidence():
-    """The unfiltered control must exhibit real leakage (matching the frozen
-    Phase 4D +dedup evidence 9/9/3 source/session/time before, 0/0/0 after),
-    proving before/after are not trivial zero/zero."""
+    """The unfiltered control must exhibit real leakage matching the frozen
+    Phase 4D +dedup evidence EXACTLY: 9/9/3 source/session/time before,
+    0/0/0 after (query-level counts)."""
     if not RESULTS.exists():
         pytest.skip("filter_eval results not generated in this checkout")
     results = json.loads(RESULTS.read_text(encoding="utf-8"))
     assert results["total_before_leakage"] > 0
     kinds = results["leakage_by_kind"]
-    assert kinds["source"]["before_query_count"] > 0
-    assert kinds["session"]["before_query_count"] > 0
-    assert kinds["time"]["before_query_count"] > 0
-    assert kinds["source"]["after_query_count"] == 0
-    assert kinds["session"]["after_query_count"] == 0
-    assert kinds["time"]["after_query_count"] == 0
+    assert kinds == {
+        "source": {"before_query_count": 9, "after_query_count": 0},
+        "session": {"before_query_count": 9, "after_query_count": 0},
+        "time": {"before_query_count": 3, "after_query_count": 0},
+    }
 
 
 def test_filter_eval_unfiltered_regression_is_flat():
@@ -198,3 +219,4 @@ def test_filter_eval_report_derives_from_results():
         assert str(case["before"]) in report
         assert str(case["after"]) in report
         assert str(case["filtered_is_order_preserving_subsequence"]) in report
+

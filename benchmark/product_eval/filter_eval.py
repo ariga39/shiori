@@ -35,6 +35,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime, timedelta
@@ -334,7 +335,25 @@ def _run_case(
             "p50_ms": round(_percentile(filtered_ms, 50), 3),
             "p95_ms": round(_percentile(filtered_ms, 95), 3),
         },
+        "_control_raw_ms": control_ms,
+        "_filtered_raw_ms": filtered_ms,
     }
+
+
+def _runtime_head() -> str:
+    """Exact HEAD of the harness checkout (must match the runtime commit)."""
+    import subprocess
+
+    out = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    head = out.stdout.strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise FilterEvalError(f"git rev-parse HEAD returned invalid sha: {head!r}")
+    return head
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -343,9 +362,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=20)
     parser.add_argument("--out-results", type=Path, default=OUT_RESULTS)
     parser.add_argument("--out-report", type=Path, default=OUT_REPORT)
+    parser.add_argument(
+        "--harness-sha",
+        default=None,
+        help="expected exact HEAD; if given, must equal `git rev-parse HEAD` (fail closed)",
+    )
     args = parser.parse_args(argv)
     if not args.dsn:
         parser.error("SHIORI_DATABASE_DSN is required")
+
+    harness_sha = _runtime_head()
+    if args.harness_sha and args.harness_sha != harness_sha:
+        raise FilterEvalError(
+            f"--harness-sha {args.harness_sha} does not match runtime HEAD {harness_sha}"
+        )
 
     manifest = _load_json(MANIFEST)
     ledger = _load_json(LEDGER)
@@ -427,6 +457,8 @@ def main(argv: list[str] | None = None) -> int:
             raise FilterEvalError(f"expected 9 dev filter cases, got {len(filter_ids)}")
 
         cases = []
+        all_control_raw: list[float] = []
+        all_filtered_raw: list[float] = []
         for qid in filter_ids:
             ledger_row = ledger[qid]
             query_text = golden_texts.get(qid, "")
@@ -443,6 +475,10 @@ def main(argv: list[str] | None = None) -> int:
                 session_prefix=SESSION_PREFIX,
                 latency_reps=LATENCY_REPS,
             )
+            raw_control = case.pop("_control_raw_ms")
+            raw_filtered = case.pop("_filtered_raw_ms")
+            all_control_raw.extend(raw_control)
+            all_filtered_raw.extend(raw_filtered)
             cases.append(
                 {
                     "query_id": qid,
@@ -476,34 +512,47 @@ def main(argv: list[str] | None = None) -> int:
             "time": {"before_query_count": before_kind["time"], "after_query_count": after_kind["time"]},
         }
 
-        # True aggregate latency across ALL timed samples (per case already has
-        # sample_count=LATENCY_REPS; aggregate over the 9 cases x reps).
-        # Per-case latencies are stored as dicts; report aggregate means of the
-        # per-case p50/p95 as the top-level latency summary.
-        agg_control_p50 = [c["control_latency_ms"]["p50_ms"] for c in cases]
-        agg_control_p95 = [c["control_latency_ms"]["p95_ms"] for c in cases]
-        agg_filtered_p50 = [c["filtered_latency_ms"]["p50_ms"] for c in cases]
-        agg_filtered_p95 = [c["filtered_latency_ms"]["p95_ms"] for c in cases]
+        # True aggregate latency: percentiles over ALL raw timing samples
+        # (9 cases x LATENCY_REPS), not the mean of per-case percentiles.
+        def _pct(vals: list[float], p: float) -> float:
+            s = sorted(vals)
+            return s[min(int(len(s) * p / 100.0), len(s) - 1)]
+
         latency = {
             "latency_reps": LATENCY_REPS,
-            "control_p50_ms": round(sum(agg_control_p50) / len(agg_control_p50), 3),
-            "control_p95_ms": round(sum(agg_control_p95) / len(agg_control_p95), 3),
-            "filtered_p50_ms": round(sum(agg_filtered_p50) / len(agg_filtered_p50), 3),
-            "filtered_p95_ms": round(sum(agg_filtered_p95) / len(agg_filtered_p95), 3),
+            "control_p50_ms": round(_pct(all_control_raw, 50), 3),
+            "control_p95_ms": round(_pct(all_control_raw, 95), 3),
+            "filtered_p50_ms": round(_pct(all_filtered_raw, 50), 3),
+            "filtered_p95_ms": round(_pct(all_filtered_raw, 95), 3),
         }
 
         # 72-dev unfiltered base-vs-head regression (independent oracle), read
-        # from the frozen baseline + the exact-head runner artifact.
+        # from the frozen baseline + the exact-head runner artifact.  The SHAs
+        # are validated against the ACTUAL files before loading (fail closed),
+        # and trace comparison requires exact config/qid/event-length equality.
         if not BASELINE.is_file():
             raise FilterEvalError("frozen baseline_72_results.json missing for unfiltered_regression")
+        if _sha256(BASELINE) != BASELINE_RUNNER_SHA256:
+            raise FilterEvalError(
+                f"baseline_72_results.json SHA mismatch: {_sha256(BASELINE)[:16]}… != {BASELINE_RUNNER_SHA256[:16]}…"
+            )
         baseline = _load_json(BASELINE)
-        if not HEAD_RUNNER_SHA256:
-            raise FilterEvalError("head runner artifact SHA not pinned")
         head_runner_path = REPO_ROOT / "benchmark" / ".generated" / "task25_runner_72.json"
+        if not head_runner_path.is_file():
+            raise FilterEvalError("head runner artifact .generated/task25_runner_72.json missing")
+        if _sha256(head_runner_path) != HEAD_RUNNER_SHA256:
+            raise FilterEvalError(
+                f"task25_runner_72.json SHA mismatch: {_sha256(head_runner_path)[:16]}… != {HEAD_RUNNER_SHA256[:16]}…"
+            )
         head_runner = _load_json(head_runner_path)
+
+        base_configs = set(baseline["configs"])
+        head_configs = set(head_runner["configs"])
+        if base_configs != head_configs:
+            raise FilterEvalError(f"runner config sets differ: base-head={base_configs - head_configs}")
         config_deltas: dict[str, dict[str, float]] = {}
         trace_mismatch = {"doc_rank_reason_stage": 0, "score_only": 0, "events": 0}
-        for cfg in baseline["configs"]:
+        for cfg in sorted(base_configs):
             bb = baseline["configs"][cfg]
             hh = head_runner["configs"][cfg]
             config_deltas[cfg] = {
@@ -512,7 +561,11 @@ def main(argv: list[str] | None = None) -> int:
             }
             bt = baseline["traces"][cfg]
             ht = head_runner["traces"][cfg]
-            for qid in bt:
+            if set(bt) != set(ht):
+                raise FilterEvalError(f"{cfg}: trace qid sets differ")
+            for qid in sorted(bt):
+                if len(bt[qid]) != len(ht[qid]):
+                    raise FilterEvalError(f"{cfg}/{qid}: trace event length differs")
                 for be, he in zip(bt[qid], ht[qid]):
                     trace_mismatch["events"] += 1
                     if (
@@ -551,8 +604,8 @@ def main(argv: list[str] | None = None) -> int:
             "dev_query_vectors.json": _sha256(DEV_VECTORS),
         }
         results = {
-            "schema": "shiori-filter-eval/v3",
-            "harness_sha": "b5728dc69890618f7c1a20f4bf72bf337c20ddae",
+            "schema": "shiori-filter-eval/v4",
+            "harness_sha": harness_sha,
             "implementation_sha": os.environ.get("SHIORI_FILTER_EVAL_BASE_SHA", ""),
             "embedding_mode": "pinned_local_replay",
             "model_identity": MODEL_IDENTITY,
@@ -575,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
         lines = [
             "# Phase 4E1 dev-only filter evaluation",
             "",
-            "- schema: `shiori-filter-eval/v3`",
+            "- schema: `shiori-filter-eval/v4`",
             f"- harness SHA: `{results['harness_sha']}`",
             f"- implementation SHA: `{results['implementation_sha'] or '(unset)'}`",
             f"- embedding mode: `{results['embedding_mode']}`",
@@ -588,7 +641,7 @@ def main(argv: list[str] | None = None) -> int:
             f"- total before leakage (rows): {total_before}",
             f"- total after leakage (rows): {total_after}",
             f"- total coverage risk (rows): {total_coverage_risk}",
-            f"- latency p50/p95 (mean of per-case p50/p95): {json.dumps(latency, sort_keys=True)}",
+            f"- latency p50/p95 (aggregate over {len(all_filtered_raw)} raw samples): {json.dumps(latency, sort_keys=True)}",
             f"- unfiltered regression: {json.dumps(unfiltered_regression, sort_keys=True)}",
             f"- ok: {results['ok']}",
             "",
