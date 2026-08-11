@@ -138,3 +138,24 @@ def test_search_page_preserves_distinct_evidence_across_pages(replay_query, db):
     assert page1.has_more is True
     assert [row[0] for row in page2.results] == [A]
     assert page2.has_more is False
+
+
+def test_filtered_search_keeps_distinct_evidence_without_leakage(replay_query, db):
+    conn, prefix = db
+    target = prefix + "-filter-target"
+    other = prefix + "-filter-other"
+    now = datetime.now(UTC)
+    # Target session holds B + A; a distinct session holds an identical B to
+    # prove the session filter excludes it.  Distinct evidence in the target
+    # must survive dedup with zero session leakage.
+    _insert(conn, target, B, replay_query.embed(B, input_type="document"), now)
+    _insert(conn, target, A, replay_query.embed(A, input_type="document"), now)
+    _insert(conn, other, B, replay_query.embed(B, input_type="document"), now)
+
+    filters = query.SearchFilters.from_inputs(session_ids=[target])
+    results = query.search(QUERY, limit=20, filters=filters)
+    mine = [(row[0], row[3]) for row in results if row[3] == target]
+    leaked = [(row[0], row[3]) for row in results if row[3] != target]
+
+    assert mine == [(B, target), (A, target)]
+    assert leaked == []
