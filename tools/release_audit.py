@@ -62,6 +62,10 @@ def _is_documented_example(category: str, match: str, *, source: str, path: str)
     if source == "reachable_blob" and (
         (path == "tests/test_release_audit.py" and category in {"private_key", "credential_assignment"})
         or (path == "tools/release_audit.py" and category == "host_path")
+        # The Phase 4E1 measurement-sanitization test asserts the generated
+        # report contains no host paths; its regex literal is a documented
+        # fixture, not a real path.  Path-exact so no other file can opt out.
+        or (path == "tests/test_filter_eval.py" and category == "host_path")
     ):
         return True
     if category == "email_in_blob":
