@@ -13,8 +13,6 @@ from urllib.parse import quote, urlparse
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "mkdocs.yml"
-OUTPUTS = (ROOT / "llms.txt", ROOT / "docs" / "llms.txt")
 
 
 class LlmsTxtError(ValueError):
@@ -41,10 +39,10 @@ def _pages(items: object) -> list[tuple[str, str]]:
     return pages
 
 
-def _validated_pages(nav: object) -> list[tuple[str, str]]:
+def _validated_pages(nav: object, root: Path) -> list[tuple[str, str]]:
     pages = _pages(nav)
     seen: set[str] = set()
-    docs_root = (ROOT / "docs").resolve()
+    docs_root = (root / "docs").resolve()
 
     for _, target in pages:
         parsed = urlparse(target)
@@ -61,9 +59,13 @@ def _validated_pages(nav: object) -> list[tuple[str, str]]:
     return pages
 
 
-def _render() -> str:
-    config: dict[str, Any] = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+def _render(root: Path) -> str:
+    config: dict[str, Any] = yaml.safe_load(
+        (root / "mkdocs.yml").read_text(encoding="utf-8")
+    )
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]
     base_url = config.get("extra", {}).get("raw_docs_base_url")
     if not isinstance(base_url, str) or not base_url.endswith("/"):
         raise LlmsTxtError("raw_docs_base_url must be an absolute directory URL")
@@ -79,21 +81,29 @@ def _render() -> str:
         "## Documentation",
         "",
     ]
-    for label, target in _validated_pages(config.get("nav")):
+    for label, target in _validated_pages(config.get("nav"), root):
         lines.append(f"- [{label}]({base_url}{quote(target, safe='/')}): Raw Markdown source.")
     return "\n".join(lines) + "\n"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--check", action="store_true")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--check", action="store_true")
+    mode.add_argument("--write", action="store_true")
+    parser.add_argument("--dir", type=Path, default=ROOT)
     args = parser.parse_args(argv)
-    if not args.check:
-        parser.error("--check is required")
+    root = args.dir.resolve()
+    outputs = (root / "llms.txt", root / "docs" / "llms.txt")
 
     try:
-        expected = _render().encode("utf-8")
-        if any(path.read_bytes() != expected for path in OUTPUTS):
+        expected = _render(root).encode("utf-8")
+        if args.write:
+            for path in outputs:
+                path.write_bytes(expected)
+            print("wrote llms.txt and docs/llms.txt")
+            return 0
+        if any(path.read_bytes() != expected for path in outputs):
             raise LlmsTxtError("generated files differ from documentation navigation")
     except (KeyError, LlmsTxtError, OSError, tomllib.TOMLDecodeError, yaml.YAMLError):
         print("llms.txt is out of date", file=sys.stderr)
