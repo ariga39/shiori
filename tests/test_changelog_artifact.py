@@ -37,6 +37,7 @@ def test_changelog_lists_audited_history_in_order() -> None:
         assert index >= 0, f"missing header after position {position}: {header!r}"
         position = index + len(header)
 
-    bullet_positions = [text.find(bullet) for bullet in EXPECTED_BULLETS]
-    assert all(pos >= 0 for pos in bullet_positions), bullet_positions
-    assert bullet_positions == sorted(bullet_positions), bullet_positions
+    for bullet in EXPECTED_BULLETS:
+        index = text.find(bullet, position)
+        assert index >= 0, f"missing bullet after position {position}: {bullet!r}"
+        position = index + len(bullet)
