@@ -6,6 +6,7 @@ theme:
 nav:
   - Home: index.md
   - User guide:
+      - Getting started: getting-started.md
       - Configuration: CONFIGURATION.md
       - Privacy: privacy-policy.md
   - Reference:
