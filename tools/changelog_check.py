@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 WAIVER_RE = re.compile(r"^changelog\.d/([1-9][0-9]*)\.no-changelog\.md$")
+FRAGMENT_RE = re.compile(r"^changelog\.d/([1-9][0-9]*)\.([^.\/]+)\.md$")
 REJECT = "changelog-check: rejected"
 
 
@@ -70,11 +71,18 @@ def main(argv: list[str] | None = None) -> int:
     changed = _changed_files(repo, args.base)
 
     waivers = [name for name in changed if WAIVER_RE.match(name)]
-    ordinary = [
+    ordinary = [name for name in changed if FRAGMENT_RE.match(name)]
+    other_changelog = [
         name
         for name in changed
-        if name.startswith("changelog.d/") and not WAIVER_RE.match(name)
+        if name.startswith("changelog.d/")
+        and not WAIVER_RE.match(name)
+        and not FRAGMENT_RE.match(name)
     ]
+
+    if other_changelog:
+        print(REJECT, file=sys.stderr)
+        return 1
 
     draft = _draft(repo)
     if draft.returncode != 0:
