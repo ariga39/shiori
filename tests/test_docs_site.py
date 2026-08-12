@@ -288,3 +288,38 @@ def test_docs_site_has_no_missing_internal_anchors(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "does not contain an anchor" not in result.stderr
+
+
+def test_docs_contributing_explains_changelog_fragments(tmp_path: Path) -> None:
+    """The strict-built contributing guide must explain the changelog contract."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mkdocs",
+            "build",
+            "--strict",
+            "--site-dir",
+            str(tmp_path / "site"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    page = (tmp_path / "site" / "contributing" / "index.html").read_text(encoding="utf-8")
+    assert 'id="changelog-fragments">Changelog fragments</h2>' in page
+    assert "changelog.d/&lt;issue&gt;.&lt;type&gt;.md" in page
+    assert "changelog.d/&lt;issue&gt;.no-changelog.md" in page
+    assert "User-visible changes require at least one changelog fragment." in page
+    assert (
+        "Internal or test-only pull requests may instead use exactly one non-empty waiver."
+        in page
+    )
+    assert (
+        "The waiver must explain why no user-facing changelog entry is needed and must "
+        "not be mixed with ordinary fragments."
+        in page
+    )
