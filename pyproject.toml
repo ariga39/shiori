@@ -70,4 +70,3 @@ reportMissingImports = false
 directory = "changelog.d"
 filename = "CHANGELOG.md"
 package = "shiori"
-package_dir = "shiori"
