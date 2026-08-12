@@ -66,6 +66,9 @@ jobs:
       - name: Lint project
         run: uv run ruff check .
 
+      - name: Check documentation site and LLM index
+        run: uv run python tools/docs_check.py --site-dir "${RUNNER_TEMP}/shiori-docs-site"
+
       - name: Type-check installable package
         run: uv run pyright
 
