@@ -120,8 +120,8 @@ def test_changelog_check_accepts_multiple_ordinary_fragments(tmp_path: Path) -> 
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
     ).strip()
 
-    feature = "First feature delivered to users."
-    bugfix = "A bugfix for a user-visible failure."
+    feature = "Fix user-visible failure"
+    bugfix = "Fix user-visible failure in CLI search"
     (changelog_dir / "42.feature.md").write_text(feature + "\n", encoding="utf-8")
     (changelog_dir / "43.bugfix.md").write_text(bugfix + "\n", encoding="utf-8")
     _run_git(tmp_path, "add", "changelog.d")
