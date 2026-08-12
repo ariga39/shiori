@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-"""Public fail-closed changelog waiver check for the shiori repository.
+"""Public fail-closed changelog check for the shiori repository.
 
-Compares a real git base-to-HEAD diff and accepts exactly one non-empty
-``changelog.d/<positive-integer>.no-changelog.md`` waiver when no ordinary
-Towncrier fragment is present, verifying through the public Towncrier draft
-that the ignore glob keeps the waiver out of the aggregated CHANGELOG.
+Compares a real git base-to-HEAD diff and accepts exactly one of two frozen
+success paths:
 
-Only this frozen single-waiver success path is implemented; every other
-state fails closed with a single uniform ``changelog-check: rejected`` line
-on stderr and exit code 1. Ordinary fragment acceptance, specific rejection
-messages, and the remaining enforcement states are added by later TDD slices.
+- a single non-empty ``changelog.d/<positive-integer>.no-changelog.md``
+  waiver when no ordinary Towncrier fragment is present, verified through the
+  public Towncrier draft so the ignore glob keeps the waiver out of the
+  aggregate; or
+- a single ``changelog.d/<positive-integer>.<type>.md`` ordinary fragment
+  (type validity is enforced by the existing Towncrier configuration and
+  strict draft) when no waiver is present, whose content appears in the draft.
+
+Every other state fails closed with a single uniform ``changelog-check:
+rejected`` line on stderr and exit code 1. Specific rejection messages and the
+remaining enforcement states are added by later TDD slices.
 """
 
 from __future__ import annotations
@@ -37,31 +42,8 @@ def _changed_files(repo: Path, base: str) -> list[str]:
     return _git(repo, "diff", "--name-only", f"{base}...HEAD").splitlines()
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", default=".")
-    parser.add_argument("--base", required=True)
-    args = parser.parse_args(argv)
-
-    repo = Path(args.dir).resolve()
-    changed = _changed_files(repo, args.base)
-
-    waivers = [name for name in changed if WAIVER_RE.match(name)]
-    has_ordinary_fragment = any(
-        not WAIVER_RE.match(name) and name.startswith("changelog.d/") for name in changed
-    )
-
-    if has_ordinary_fragment or len(waivers) != 1:
-        print(REJECT, file=sys.stderr)
-        return 1
-
-    waiver_path = repo / waivers[0]
-    reason = waiver_path.read_text(encoding="utf-8").strip()
-    if not reason:
-        print(REJECT, file=sys.stderr)
-        return 1
-
-    draft = subprocess.run(
+def _draft(repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             sys.executable,
             "-m",
@@ -76,13 +58,44 @@ def main(argv: list[str] | None = None) -> int:
         capture_output=True,
         text=True,
     )
-    if draft.returncode != 0 or reason in draft.stdout:
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dir", default=".")
+    parser.add_argument("--base", required=True)
+    args = parser.parse_args(argv)
+
+    repo = Path(args.dir).resolve()
+    changed = _changed_files(repo, args.base)
+
+    waivers = [name for name in changed if WAIVER_RE.match(name)]
+    ordinary = [
+        name
+        for name in changed
+        if name.startswith("changelog.d/") and not WAIVER_RE.match(name)
+    ]
+
+    draft = _draft(repo)
+    if draft.returncode != 0:
         print(REJECT, file=sys.stderr)
         return 1
 
-    issue = WAIVER_RE.match(waivers[0]).group(1)
-    print(f"changelog-check: waiver {issue} accepted")
-    return 0
+    if not ordinary and len(waivers) == 1:
+        reason = (repo / waivers[0]).read_text(encoding="utf-8").strip()
+        if reason and reason not in draft.stdout:
+            issue = WAIVER_RE.match(waivers[0]).group(1)
+            print(f"changelog-check: waiver {issue} accepted")
+            return 0
+
+    if not waivers and len(ordinary) == 1:
+        content = (repo / ordinary[0]).read_text(encoding="utf-8").strip()
+        if content and content in draft.stdout:
+            print(f"changelog-check: fragment {Path(ordinary[0]).name} accepted")
+            return 0
+
+    print(REJECT, file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
