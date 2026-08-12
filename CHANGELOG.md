@@ -10,7 +10,7 @@
 - Added bounded CLI search and a read-only MCP server.
 - Added versioned PostgreSQL migrations, health checks, backup, and restore.
 - Added ingestion privacy controls, retention, export, and deletion.
-- Renamed the product from shiyi to Shiori with data-safe compatibility.
+- Renamed the product to Shiori with data-safe compatibility.
 - Added a synthetic retrieval-quality benchmark and reproducible local vectors.
 - Added real installed-wheel end-to-end ingestion, restart, CLI, and MCP coverage.
 - Added production-pipeline retrieval ablations and external sanity adapters.
