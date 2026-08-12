@@ -187,3 +187,58 @@ def test_llms_txt_matches_documentation_navigation() -> None:
     positions = [rendered.find(url) for url in expected_urls]
     assert all(position >= 0 for position in positions), positions
     assert positions == sorted(positions), positions
+
+
+def test_llms_txt_write_is_deterministic(tmp_path: Path) -> None:
+    """The public writer must deterministically regenerate both llms.txt copies."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "index.md").write_text("# Fixture Docs\n", encoding="utf-8")
+    (tmp_path / "mkdocs.yml").write_text(
+        """site_name: Fixture Docs
+extra:
+  raw_docs_base_url: https://example.invalid/docs/
+nav:
+  - Home: index.md
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        """[project]
+name = "fixture-docs"
+version = "0.0.0"
+description = "Fixture documentation"
+requires-python = ">=3.11"
+""",
+        encoding="utf-8",
+    )
+    expected = b"""# Fixture Docs
+
+> Fixture documentation.
+
+## Documentation
+
+- [Home](https://example.invalid/docs/index.md): Raw Markdown source.
+"""
+    command = [
+        sys.executable,
+        str(ROOT / "tools" / "build_llms_txt.py"),
+        "--write",
+        "--dir",
+        str(tmp_path),
+    ]
+
+    first = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    assert first.returncode == 0, first.stderr
+    assert first.stdout == "wrote llms.txt and docs/llms.txt\n"
+    assert first.stderr == ""
+    assert (tmp_path / "llms.txt").read_bytes() == expected
+    assert (tmp_path / "docs" / "llms.txt").read_bytes() == expected
+
+    second = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    assert second.returncode == 0, second.stderr
+    assert second.stdout == "wrote llms.txt and docs/llms.txt\n"
+    assert second.stderr == ""
+    assert (tmp_path / "llms.txt").read_bytes() == expected
+    assert (tmp_path / "docs" / "llms.txt").read_bytes() == expected
