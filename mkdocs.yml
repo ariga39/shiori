@@ -3,6 +3,9 @@ site_name: Shiori
 theme:
   name: mkdocs
 
+extra:
+  raw_docs_base_url: https://raw.githubusercontent.com/ariga39/shiori/main/docs/
+
 nav:
   - Home: index.md
   - User guide:
