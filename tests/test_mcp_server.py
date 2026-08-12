@@ -120,3 +120,245 @@ def test_search_failure_mapped_to_readable_error(server, monkeypatch):
     data = _parse(result)
     assert data["error"] == {"code": "search_failed", "type": "RuntimeError"}
     assert "synthetic-secret" not in json.dumps(data)
+
+
+def _mcp_tuple_row(i=1):
+    return (
+        f"content-{i}",
+        0.9,
+        datetime(2026, 1, i, tzinfo=UTC),
+        f"session-{i}",
+        "main_user",
+        "voyage-4-large",
+        1024,
+    )
+
+
+def _mcp_dict_row(i=1):
+    return {
+        "content": f"content-{i}",
+        "score": 0.9,
+        "timestamp": f"2026-01-{i:02d}T00:00:00+00:00",
+        "session_id": f"session-{i}",
+        "source_type": "main_user",
+        "embedding_model": "voyage-4-large",
+        "embedding_dimension": 1024,
+        "provenance": {
+            "timestamp": f"2026-01-{i:02d}T00:00:00+00:00",
+            "session_id": f"session-{i}",
+            "source_type": "main_user",
+            "embedding_model": "voyage-4-large",
+            "embedding_dimension": 1024,
+        },
+        "explain": {
+            "score_kind": "rrf",
+            "adjustments": [],
+            "channels": {
+                "dense": {"matched": True, "candidate_rank": 1},
+                "lexical": {"matched": True, "candidate_rank": 1},
+                "exact": {"matched": True, "candidate_rank": 1},
+            },
+            "matched_channel_count": 3,
+            "multi_channel": True,
+        },
+    }
+
+
+def test_run_search_explain_preserves_default_and_contract(monkeypatch):
+    """Phase 4F1 slice3 genuine red (task #39).
+
+    ``mcp_server.run_search(..., explain=True)`` must produce the same JSON
+    payload shape as the default (same pagination/count fields), with each
+    result keeping its existing top-level fields and ``provenance`` unchanged
+    and gaining ONLY the frozen ``explain`` sub-dict (no provenance inside
+    explain).  ``explain=False`` and the omitted form must produce identical
+    payload dicts (key/value/iteration order equal).
+
+    The seam is public ``mcp_server.run_search``; ``query.search_page`` is
+    stubbed to record calls and return tuple rows by default / slice1-shaped
+    dict rows (full top-level fields + provenance + frozen explain) when
+    ``explain=True``.  No product-code/schema/_search_tool edits.
+
+    On the current head this node fails ONLY because public ``run_search``
+    does not accept an ``explain`` keyword argument.
+    """
+    calls = []
+
+    def fake_search_page(text, *, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        rows = (
+            [_mcp_tuple_row(i) for i in range(1, limit + 1)]
+            if not explain
+            else [_mcp_dict_row(i) for i in range(1, limit + 1)]
+        )
+        return query.SearchPage(
+            results=rows,
+            limit=limit,
+            offset=offset,
+            has_more=True,
+            next_offset=offset + limit,
+        )
+
+    monkeypatch.setattr(query, "search_page", fake_search_page)
+
+    omitted = mcp_server.run_search("probe")
+    false_explicit = mcp_server.run_search("probe", explain=False)
+    true_explicit = mcp_server.run_search("probe", explain=True)
+
+    # omitted and explain=False payload dicts are fully identical.
+    assert false_explicit == omitted
+    assert list(false_explicit) == list(omitted)
+    assert calls == [False, False, True]
+
+    # true payload keeps pagination/count fields; results grow only explain.
+    for key in ("limit", "offset", "has_more", "next_offset", "count"):
+        assert true_explicit[key] == omitted[key]
+    assert "error" not in true_explicit
+
+    assert len(true_explicit["results"]) == len(omitted["results"])
+    for row, ref in zip(true_explicit["results"], omitted["results"]):
+        # "Only explain added": dropping explain yields the default ref row
+        # with identical key/value/iteration order.
+        row_without_explain = {k: v for k, v in row.items() if k != "explain"}
+        assert row_without_explain == ref
+        assert list(row_without_explain) == list(ref)
+        assert list(row) == [*list(ref), "explain"]
+        # Frozen explain literal, with no provenance inside it.
+        assert row["explain"] == _mcp_dict_row()["explain"]
+        assert "provenance" not in row["explain"]
+
+
+def test_search_tool_schema_and_call_explain(server, monkeypatch):
+    """Phase 4F1 slice4 genuine red (task #39).
+
+    The public ``search`` tool schema must declare an optional ``explain``
+    parameter (boolean, default false) alongside the existing fields, and
+    ``call_tool("search", ...)`` must produce the same payload for omitted /
+    ``explain:false``, and for ``explain:true`` each result gains ONLY the
+    frozen explain sub-dict with pagination/provenance unchanged.
+
+    ``query.search_page`` is stubbed (tuple rows default, slice1-shaped dict
+    rows on explain=True).  No product/schema/_search_tool edits.
+
+    On the current head this node fails ONLY because the tool schema has no
+    ``explain`` property.
+    """
+    tools = _list_tools(server)
+    search = next(t for t in tools if t.name == "search")
+
+    # Schema first: existing fields unchanged, explain optional bool default false.
+    schema = search.inputSchema
+    props = schema["properties"]
+    for key in ("query", "limit", "offset", "source_types", "session_ids",
+                "time_from", "time_to"):
+        assert key in props
+    assert "explain" in props
+    assert props["explain"]["type"] == "boolean"
+    assert props["explain"].get("default") is False
+    assert schema["required"] == ["query"]
+
+    calls = []
+
+    def fake_search_page(text, *, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        rows = (
+            [_mcp_tuple_row(i) for i in range(1, limit + 1)]
+            if not explain
+            else [_mcp_dict_row(i) for i in range(1, limit + 1)]
+        )
+        return query.SearchPage(
+            results=rows,
+            limit=limit,
+            offset=offset,
+            has_more=True,
+            next_offset=offset + limit,
+        )
+
+    monkeypatch.setattr(query, "search_page", fake_search_page)
+
+    omitted = _parse(_call(server, "search", {"query": "probe"}))
+    false_explicit = _parse(_call(server, "search", {"query": "probe", "explain": False}))
+    true_explicit = _parse(_call(server, "search", {"query": "probe", "explain": True}))
+
+    assert false_explicit == omitted
+    assert list(false_explicit) == list(omitted)
+    assert calls == [False, False, True]
+
+    for key in ("limit", "offset", "has_more", "next_offset", "count"):
+        assert true_explicit[key] == omitted[key]
+    assert "error" not in true_explicit
+
+    assert len(true_explicit["results"]) == len(omitted["results"])
+    for row, ref in zip(true_explicit["results"], omitted["results"]):
+        row_without_explain = {k: v for k, v in row.items() if k != "explain"}
+        assert row_without_explain == ref
+        assert list(row_without_explain) == list(ref)
+        assert list(row) == [*list(ref), "explain"]
+        assert row["explain"] == _mcp_dict_row()["explain"]
+        assert "provenance" not in row["explain"]
+
+
+_MCP_ZERO_ROW_SUMMARY = {
+    "candidate_pool_limit": 30,
+    "channels": {
+        "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+        "lexical": {
+            "executed": True,
+            "fetched_count": 0,
+            "at_pool_limit": False,
+            "method": "trigram_fallback",
+        },
+        "exact": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+    },
+    "fused_candidate_count": 0,
+    "selected_candidate_count": 0,
+    "returned_count": 0,
+}
+
+
+def test_run_search_explain_summary_zero_rows(monkeypatch):
+    """Phase 4F1 slice12 genuine red (task #39).
+
+    ``mcp_server.run_search(..., explain=True)`` on an empty result must add a
+    top-level ``explain_summary`` equal to the frozen zero-row literal, while
+    omitted/``explain=False`` payloads stay identical to each other and carry
+    NO ``explain_summary`` key.  Pagination/count fields and their order are
+    unchanged on the true path.
+
+    ``query.search_page`` is stubbed (tuple empty page default; empty page with
+    the frozen explain_summary on True).  No product/schema/_search_tool edits.
+
+    On the current head this node fails ONLY because the explain=True payload
+    has no top-level ``explain_summary`` key.
+    """
+    calls = []
+
+    def fake_search_page(text, *, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        return query.SearchPage(
+            results=[],
+            limit=limit,
+            offset=offset,
+            has_more=False,
+            next_offset=None,
+            explain_summary=_MCP_ZERO_ROW_SUMMARY if explain else None,
+        )
+
+    monkeypatch.setattr(query, "search_page", fake_search_page)
+
+    omitted = mcp_server.run_search("probe")
+    false_explicit = mcp_server.run_search("probe", explain=False)
+    true_explicit = mcp_server.run_search("probe", explain=True)
+
+    assert false_explicit == omitted
+    assert list(false_explicit) == list(omitted)
+    assert "explain_summary" not in omitted
+    assert "explain_summary" not in false_explicit
+    assert calls == [False, False, True]
+
+    # true payload: existing fields unchanged, explain_summary appended last.
+    assert list(true_explicit) == [*list(omitted), "explain_summary"]
+    for key in ("results", "count", "limit", "offset", "has_more", "next_offset"):
+        assert true_explicit[key] == omitted[key]
+    assert true_explicit["explain_summary"] == _MCP_ZERO_ROW_SUMMARY
+    assert "error" not in true_explicit

@@ -94,6 +94,22 @@ the embedding model and dimension used for compatibility filtering. Invalid
 input, provider failures, dimension/model mismatches, and database failures
 return stable error codes without backend text or credentials.
 
+`shiori query ... --explain` (and the MCP `search` tool with `explain:true`)
+enables opt-in retrieval explanation. Without the flag/parameter the default
+semantics are unchanged: the CLI prints only the result text to stdout (empty
+diagnostics, pipe-clean), and the MCP payload carries no `explain` key. With
+explain enabled:
+
+- The CLI writes one human-readable `Explain: ...` line per result to **stderr**
+  (stdout stays identical to the non-explain result text and remains pipeable).
+  A zero-result run keeps `No results found.` on stdout and writes a
+  `Explain summary: ...` line to stderr.
+- The MCP response adds a per-result `explain` object only when `explain:true`,
+  and adds a top-level `explain_summary` (bounded-pool candidate counts) for
+  the page, which also covers the zero-result case.
+
+See **Search behavior** below for the exact fields and semantics.
+
 The original script entry points remain as compatibility wrappers and accept
 the same `--config` and `--legacy-openclaw` switches. New deployments should
 use the installed `shiori` command.
@@ -217,6 +233,73 @@ tie-breaks and a one-row look-ahead for truthful pagination. Rows from a
 different embedding model or vector dimension are excluded rather than
 silently mixed into a result page. The MCP surface performs no ingest or
 other data-writing operation.
+
+### Retrieval explanation (opt-in)
+
+When enabled (`shiori query --explain`, or MCP `search` with `explain:true`),
+the service reports **why** each result was retrieved. None of these fields is
+a correctness probability, a confidence score, or a hard threshold.
+
+Per result:
+
+- `score_kind: "rrf"` — the top-level `score` is the in-query RRF fusion
+  ranking score (a ranking signal, not a probability).
+- `adjustments` — only adjustments actually applied; currently
+  `["temporal_decay"]` when Phase 4E2 decay ran under explicit time intent,
+  otherwise `[]`.
+- `channels` — per channel (`dense`, `lexical`, `exact`):
+  `matched` and `candidate_rank`. `candidate_rank` is the position of the
+  result in that channel's real candidate pool, **not** its final result rank;
+  an unmatched channel reports `matched:false, candidate_rank:null`.
+- `matched_channel_count` / `multi_channel` — how many channels matched this
+  result; multiple matching channels are corroboration, not probability.
+- Provenance stays in the existing top-level fields; it is not copied into
+  `explain`.
+
+Per page (`explain_summary`), covering the zero-result case:
+
+- `candidate_pool_limit` — the bounded candidate-pool size for this request.
+- `channels.<name>.executed` — whether that channel actually ran. The exact
+  channel reports `executed:false` when the query is longer than 20 characters
+  (its SQL path is skipped). `method` belongs only to `lexical` and is one of
+  `ts_rank_cd`, `trigram_fallback`, or `none`.
+- `channels.<name>.fetched_count` — the number of rows actually fetched from
+  the bounded candidate pool after filtering; this is **not** the total number
+  of database hits. `at_pool_limit:true` only means "there may be more";
+  `fetched_count:0` with `at_pool_limit:false` means the executed channel
+  genuinely found no candidate.
+- `fused_candidate_count` / `selected_candidate_count` / `returned_count` —
+  the three stage counts (unique docs after RRF fusion, after dedup/final
+  filter before pagination, and rows actually returned on this page).
+
+CLI diagnostics go to **stderr** (stdout stays pipe-clean). With results:
+
+```
+--- Result 1 (score: 0.900000, time: ..., type: main_user) ---
+alpha beta
+```
+
+with stderr:
+
+```
+Explain: score=rrf; adjustments=none; channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true
+```
+
+With zero results, stdout stays:
+
+```
+No results found.
+```
+
+and stderr gets the summary:
+
+```
+Explain summary: pool_limit=30; dense=executed:true,fetched:0,at_limit:false; lexical=executed:true,fetched:0,at_limit:false,method:trigram_fallback; exact=executed:true,fetched:0,at_limit:false; fused=0; selected=0; returned=0
+```
+
+The default `search()` tuple rows and the MCP payload/results do not add
+explain keys; `SearchPage` has the additive public `explain_summary` field,
+whose default-path value is `None`.
 
 ## License
 

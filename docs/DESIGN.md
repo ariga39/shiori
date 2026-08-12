@@ -366,6 +366,41 @@ temporal_gate = config.temporal AND (
 
 `main()`（`query.py:248`）打印每条的 score、时间、source_type，正文预览截断到 500 字符（`:261-262`）。
 
+#### 5.7.1 可解释检索（Phase 4F1，2026-08-12，task #39）
+
+`search()` 支持 opt-in `explain=True`（查询层）、CLI `shiori query --explain`
+与 MCP `search` tool 的 `explain:true`。默认路径语义不变：CLI stdout 仅输出
+结果文本且可管道，MCP payload 不加 `explain` key；`SearchPage[T]` 的
+`explain_summary` 默认为 `None`。开启后：
+
+- **每条结果 `explain`**：`score_kind`（`rrf`，表示顶层 score 是查询内 RRF
+  融合排序分，不是概率）；`adjustments`（仅记录实际应用的调整，当前只有
+  显式时间意图下的 `temporal_decay`，否则空数组）；`channels`（`dense` /
+  `lexical` / `exact` 三键，各含 `matched` 与 `candidate_rank`——后者是真实
+  候选池内名次，**不是**最终结果名次，未命中为 `null`）；`matched_channel_count`
+  与 `multi_channel` 仅表示通道印证，不是概率/置信/硬阈值。provenance 沿用
+  既有顶层字段，不在 `explain` 内复制。
+- **每页 `explain_summary`**（同时覆盖 0-row）：`candidate_pool_limit`；
+  每通道 `executed` / `fetched_count` / `at_pool_limit`，且 `method` 仅属于
+  `lexical`，枚举 `ts_rank_cd` / `trigram_fallback` / `none`（exact 因长 query
+  （>20 字符）未执行时用 `executed:false`，不出现 `exact method:none`）；
+  `fused_candidate_count` / `selected_candidate_count` / `returned_count` 三阶段。
+  语义边界：`fetched_count` 是有界候选池实际取回行数，不是数据库总命中；
+  `at_pool_limit:true` 只表示"可能还有更多"；`fetched_count:0` 且
+  `at_pool_limit:false` 表示该已执行通道确实没有候选。
+- **CLI 输出**遵循 Unix 惯例，opt-in 诊断只写 **stderr**，stdout 保持干净：
+  有结果时每结果一行 `Explain: ...` 写 stderr（stdout 与默认结果文本字节相同）；
+  0-row 时 stdout 仍为 `No results found.`，stderr 追加一行 `Explain summary: ...`。
+
+外部参考（结构参考，不复制其 correctness 语义）：
+
+- Elasticsearch Search API（解释为何命中的通道/得分结构参考）：
+  <https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html>
+- Elasticsearch Explain API（逐文档得分分解参考）：
+  <https://www.elastic.co/guide/en/elasticsearch/reference/8.19/search-explain.html>
+- PostgreSQL EXPLAIN（估算与实际观测分离的参考）：
+  <https://www.postgresql.org/docs/current/using-explain.html>
+
 ---
 
 ## 6. 运维
