@@ -1517,7 +1517,8 @@ def main(argv=None):
             print(
                 f"Explain: score={ex['score_kind']}; adjustments={adj_text}; "
                 f"channels={','.join(parts)}; matched_channels={ex['matched_channel_count']}; "
-                f"multi_channel={str(ex['multi_channel']).lower()}"
+                f"multi_channel={str(ex['multi_channel']).lower()}",
+                file=sys.stderr,
             )
         print()
 
