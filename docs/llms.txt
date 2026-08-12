@@ -1,0 +1,15 @@
+# Shiori
+
+> Searchable long-term memory for AI agents.
+
+## Documentation
+
+- [Home](https://raw.githubusercontent.com/ariga39/shiori/main/docs/index.md): Raw Markdown source.
+- [Getting started](https://raw.githubusercontent.com/ariga39/shiori/main/docs/getting-started.md): Raw Markdown source.
+- [Configuration](https://raw.githubusercontent.com/ariga39/shiori/main/docs/CONFIGURATION.md): Raw Markdown source.
+- [Privacy](https://raw.githubusercontent.com/ariga39/shiori/main/docs/privacy-policy.md): Raw Markdown source.
+- [Contributing](https://raw.githubusercontent.com/ariga39/shiori/main/docs/contributing.md): Raw Markdown source.
+- [CLI and MCP](https://raw.githubusercontent.com/ariga39/shiori/main/docs/cli-mcp-reference.md): Raw Markdown source.
+- [Design](https://raw.githubusercontent.com/ariga39/shiori/main/docs/DESIGN.md): Raw Markdown source.
+- [Atomic rebuild ADR](https://raw.githubusercontent.com/ariga39/shiori/main/docs/adr/0001-atomic-rebuild-on-partial-embed-failure.md): Raw Markdown source.
+- [Release checklist](https://raw.githubusercontent.com/ariga39/shiori/main/docs/RELEASE_CHECKLIST.md): Raw Markdown source.
