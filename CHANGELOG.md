@@ -18,3 +18,4 @@
 - Applied temporal ranking only when the query expresses time intent.
 - Preserved provenance while deduplicating true duplicate results.
 - Added opt-in explainable retrieval evidence without changing default responses.
+- Added a one-source MkDocs site and deterministic llms.txt index.
