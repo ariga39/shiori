@@ -1341,9 +1341,9 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
                 "method": lexical_method,
             },
             "exact": {
-                "executed": config.exact,
+                "executed": config.exact and len(query.strip()) <= 20,
                 "fetched_count": len(exact_rows),
-                "at_pool_limit": config.exact and len(exact_rows) >= pool,
+                "at_pool_limit": (config.exact and len(query.strip()) <= 20) and len(exact_rows) >= pool,
             },
         },
         "fused_candidate_count": len(scores),
