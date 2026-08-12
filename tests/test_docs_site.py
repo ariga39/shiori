@@ -266,3 +266,25 @@ def test_docs_check_builds_site_and_llms_index(tmp_path: Path) -> None:
     assert result.stderr == ""
     assert "Shiori" in (site_dir / "index.html").read_text(encoding="utf-8")
     assert (site_dir / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
+
+
+def test_docs_site_has_no_missing_internal_anchors(tmp_path: Path) -> None:
+    """The public strict build must not report missing internal anchors."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mkdocs",
+            "build",
+            "--strict",
+            "--site-dir",
+            str(tmp_path / "site"),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "does not contain an anchor" not in result.stderr
