@@ -124,6 +124,8 @@ def run_search(query_text, limit=DEFAULT_LIMIT, offset=0, *, source_types=None, 
             "time_from": filters.time_from.isoformat() if filters.time_from else None,
             "time_to": filters.time_to.isoformat() if filters.time_to else None,
         }
+    if explain and page.explain_summary is not None:
+        payload["explain_summary"] = page.explain_summary
     return payload
 
 
