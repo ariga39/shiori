@@ -48,3 +48,14 @@ the exact commands and outcomes used as evidence, distinguish skipped checks
 from passing checks, and call out any operation that was intentionally outside
 the task scope. Do not publish packages, images, documentation, or repository
 visibility changes without separate authorization.
+
+## Changelog fragments
+
+User-visible changes require at least one changelog fragment. An ordinary
+fragment is `changelog.d/<issue>.<type>.md`, where `<issue>` is a positive
+integer and `<type>` is one of `feature`, `bugfix`, `doc`, `removal`, or
+`misc`.
+
+Internal or test-only pull requests may instead use exactly one non-empty waiver. A waiver is `changelog.d/<issue>.no-changelog.md`.
+
+The waiver must explain why no user-facing changelog entry is needed and must not be mixed with ordinary fragments.
