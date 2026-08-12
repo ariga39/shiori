@@ -194,6 +194,19 @@ def _emit_eval(stage: str, events: list[dict]) -> None:
 T = TypeVar("T")
 
 
+class _ExplainResult(list[T]):
+    """Explain-only internal carrier: a plain list that also carries the
+    frozen ``explain_summary`` (bounded-pool candidate counts) so an empty
+    result list can still transport it to ``search_page``.  This is not a
+    second public page type; ``search(..., explain=True)`` stays list-shaped."""
+
+    __slots__ = ("explain_summary",)
+
+    def __init__(self, rows=(), *, explain_summary=None):
+        super().__init__(rows)
+        self.explain_summary = explain_summary
+
+
 @dataclass(frozen=True)
 class SearchPage(Generic[T]):
     """Bounded page returned by the public query service.
@@ -201,6 +214,9 @@ class SearchPage(Generic[T]):
     ``T`` is the row type: the default path carries legacy tuple rows, and the
     opt-in ``explain=True`` path carries structured dict rows.  The pagination
     fields are identical in both, so callers can treat the page uniformly.
+
+    ``explain_summary`` is an additive opt-in field: None on the default path,
+    and the frozen bounded-pool candidate summary when ``explain=True``.
     """
 
     results: list[T]
@@ -208,6 +224,7 @@ class SearchPage(Generic[T]):
     offset: int
     has_more: bool
     next_offset: int | None
+    explain_summary: dict[str, Any] | None = None
 
 
 # Bounds for filter inputs (fail closed before SQL).
@@ -1302,7 +1319,38 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
         }
         explained.append(result)
 
-    return explained
+    # Bounded-pool candidate summary (Phase 4F1): counts of rows actually
+    # fetched per channel from the REAL candidate pools, not DB-wide hits.
+    # executed distinguishes "channel not run" from "run but 0 hits"; the
+    # lexical method records whether the trigram fallback ran.
+    lexical_method = "trigram_fallback" if trigram_used else "ts_rank_cd"
+    if not config.lexical:
+        lexical_method = "none"
+    summary: dict[str, Any] = {
+        "candidate_pool_limit": pool,
+        "channels": {
+            "dense": {
+                "executed": config.dense,
+                "fetched_count": len(vector_rows),
+                "at_pool_limit": config.dense and len(vector_rows) >= pool,
+            },
+            "lexical": {
+                "executed": config.lexical,
+                "fetched_count": len(bm25_rows),
+                "at_pool_limit": config.lexical and len(bm25_rows) >= pool,
+                "method": lexical_method,
+            },
+            "exact": {
+                "executed": config.exact,
+                "fetched_count": len(exact_rows),
+                "at_pool_limit": config.exact and len(exact_rows) >= pool,
+            },
+        },
+        "fused_candidate_count": len(scores),
+        "selected_candidate_count": len(selected),
+        "returned_count": len(page),
+    }
+    return _ExplainResult(explained, explain_summary=summary)
 
 
 @overload
@@ -1364,12 +1412,21 @@ def search_page(
             all_rows = search(query_text, limit=requested, filters=filters)
     page = all_rows[offset : offset + limit]
     has_more = len(all_rows) > offset + limit
+    if explain:
+        summary = getattr(all_rows, "explain_summary", None)
+        if summary is not None:
+            # returned_count is this page's row count, not the look-ahead rows.
+            summary = dict(summary)
+            summary["returned_count"] = len(page)
+    else:
+        summary = None
     return SearchPage(
         results=page,
         limit=limit,
         offset=offset,
         has_more=has_more,
         next_offset=offset + limit if has_more else None,
+        explain_summary=summary,
     )
 
 
