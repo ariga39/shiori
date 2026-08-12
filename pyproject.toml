@@ -70,3 +70,4 @@ reportMissingImports = false
 directory = "changelog.d"
 filename = "CHANGELOG.md"
 package = "shiori"
+ignore = ["*.no-changelog.md"]
