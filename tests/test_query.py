@@ -354,3 +354,60 @@ def test_short_name_escapes_like_wildcards(db, mock_embed):
     res = query.search("100%", limit=10)
     mine = [r for r in res if r[3] == sid]
     assert mine and "100%" in mine[0][0]
+
+
+def test_search_explain_multi_channel(db, mock_embed):
+    """Phase 4F1 slice1 genuine red (task #39).
+
+    A single doc that hits all three real candidate channels (dense + lexical
+    ts_rank_cd + exact substring) at candidate_rank 1 must, when
+    ``query.search(..., explain=True)`` is requested, return a structured
+    explain object with the frozen literal shape:
+    score_kind="rrf", adjustments=[] (no temporal intent), a fixed three-key
+    channels map (dense/lexical/exact each {matched, candidate_rank}),
+    matched_channel_count=3 and multi_channel=True.
+
+    The default ``query.search()`` (no explain) must keep returning the same
+    list of tuples with identical type/value/order before and after the
+    explain request.
+
+    On the current main this node fails ONLY because the public ``search()``
+    does not accept the ``explain`` keyword argument (TypeError), before any
+    assertion is reached.
+    """
+    conn, prefix = db
+    sid = prefix + "-explain"
+    now = datetime.now(UTC)
+    # A single human-checkable doc: dense cos=1.0 (doc emb == query emb),
+    # lexical ts_rank_cd hits ('snowflake' & 'report'), exact ILIKE hits
+    # (query len 16 <= 20, substring present).  Typed session filter isolates
+    # it as the only candidate so each channel ranks it 1.
+    _insert(conn, sid, "snowflake report is an explicit token test", QUERY_EMB, now)
+    filters = SearchFilters.from_inputs(session_ids=[sid])
+
+    default_before = query.search("snowflake report", limit=20, filters=filters)
+
+    explained = query.search(
+        "snowflake report", limit=20, filters=filters, explain=True
+    )
+
+    default_after = query.search("snowflake report", limit=20, filters=filters)
+
+    # Default path unchanged: identical type/value/order.
+    assert default_after == default_before
+    assert isinstance(default_after, list) and all(isinstance(r, tuple) for r in default_after)
+
+    # Frozen explain literal shape (human-written, not derived from a private
+    # trace or helper).
+    assert explained[0]["content"] == "snowflake report is an explicit token test"
+    assert explained[0]["explain"] == {
+        "score_kind": "rrf",
+        "adjustments": [],
+        "channels": {
+            "dense": {"matched": True, "candidate_rank": 1},
+            "lexical": {"matched": True, "candidate_rank": 1},
+            "exact": {"matched": True, "candidate_rank": 1},
+        },
+        "matched_channel_count": 3,
+        "multi_channel": True,
+    }
