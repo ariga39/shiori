@@ -9,6 +9,12 @@ PYPROJECT = REPO / "pyproject.toml"
 
 
 def test_towncrier_draft_aggregates_markdown_fragment(tmp_path: Path) -> None:
+    """The public Towncrier CLI must aggregate a markdown fragment under the pinned config.
+
+    A literal ``42.feature.md`` fragment placed in the configured fragments
+    directory renders through ``python -m towncrier build --draft`` with the
+    ``Features`` heading and the fragment content each appearing exactly once.
+    """
     fragment_dir = tmp_path / "changelog.d"
     fragment_dir.mkdir()
     content = "Changelog enforcement is now active."
