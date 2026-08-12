@@ -297,8 +297,9 @@ and stderr gets the summary:
 Explain summary: pool_limit=30; dense=executed:true,fetched:0,at_limit:false; lexical=executed:true,fetched:0,at_limit:false,method:trigram_fallback; exact=executed:true,fetched:0,at_limit:false; fused=0; selected=0; returned=0
 ```
 
-The default (non-explain) path never adds explain keys/fields; the `SearchPage`
-`explain_summary` field defaults to `None`.
+The default `search()` tuple rows and the MCP payload/results do not add
+explain keys; `SearchPage` has the additive public `explain_summary` field,
+whose default-path value is `None`.
 
 ## License
 
