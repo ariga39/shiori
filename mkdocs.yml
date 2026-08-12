@@ -5,3 +5,10 @@ theme:
 
 nav:
   - Home: index.md
+  - User guide:
+      - Configuration: CONFIGURATION.md
+      - Privacy: privacy-policy.md
+  - Reference:
+      - Design: DESIGN.md
+      - Atomic rebuild ADR: adr/0001-atomic-rebuild-on-partial-embed-failure.md
+      - Release checklist: RELEASE_CHECKLIST.md
