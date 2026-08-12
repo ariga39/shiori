@@ -51,7 +51,7 @@ def _invalid_input(code: str) -> dict[str, dict[str, str]]:
     return {"error": {"code": code}}
 
 
-def run_search(query_text, limit=DEFAULT_LIMIT, offset=0, *, source_types=None, session_ids=None, time_from=None, time_to=None):
+def run_search(query_text, limit=DEFAULT_LIMIT, offset=0, *, source_types=None, session_ids=None, time_from=None, time_to=None, explain=False):
     """Run a search, returning a JSON-serializable dict.
 
     Optional ``source_types``/``session_ids`` are bounded arrays of exact
@@ -90,14 +90,20 @@ def run_search(query_text, limit=DEFAULT_LIMIT, offset=0, *, source_types=None, 
         return {"error": {"code": exc.code}}
 
     try:
-        if filters.is_empty:
-            page = query.search_page(query_text, limit=clamped, offset=offset)
+        if explain:
+            if filters.is_empty:
+                page = query.search_page(query_text, limit=clamped, offset=offset, explain=True)
+            else:
+                page = query.search_page(query_text, limit=clamped, offset=offset, filters=filters, explain=True)
         else:
-            page = query.search_page(query_text, limit=clamped, offset=offset, filters=filters)
-        results = [
-            _serialize_result(row)
-            for row in page.results
-        ]
+            if filters.is_empty:
+                page = query.search_page(query_text, limit=clamped, offset=offset)
+            else:
+                page = query.search_page(query_text, limit=clamped, offset=offset, filters=filters)
+        if explain:
+            results = [_serialize_explain_row(row) for row in page.results]
+        else:
+            results = [_serialize_result(row) for row in page.results]
     except Exception as exc:  # noqa: BLE001 - map failures to a safe public result
         return {"error": _public_error(exc)}
 
@@ -134,6 +140,36 @@ def _serialize_result(row: tuple) -> dict:
         "embedding_dimension": provenance["embedding_dimension"],
         "provenance": provenance,
     }
+
+
+def _serialize_explain_row(row: dict) -> dict:
+    """Serialize a Phase 4F1 explain dict row into the MCP result shape.
+
+    The row carries the standard top-level fields already; ``provenance`` is
+    rebuilt from those same fields (never copied into ``explain``), and the
+    frozen ``explain`` sub-dict is appended last so the result has exactly the
+    eight default keys plus ``explain``, in the same order.
+    """
+    timestamp = _serialize_ts(row.get("timestamp"))
+    provenance = {
+        "timestamp": timestamp,
+        "session_id": row.get("session_id"),
+        "source_type": row.get("source_type"),
+        "embedding_model": row.get("embedding_model"),
+        "embedding_dimension": row.get("embedding_dimension"),
+    }
+    result = {
+        "content": row.get("content"),
+        "score": row.get("score"),
+        "timestamp": timestamp,
+        "session_id": row.get("session_id"),
+        "source_type": row.get("source_type"),
+        "embedding_model": row.get("embedding_model"),
+        "embedding_dimension": row.get("embedding_dimension"),
+        "provenance": provenance,
+    }
+    result["explain"] = row["explain"]
+    return result
 
 
 async def _search_tool(
