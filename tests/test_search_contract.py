@@ -270,3 +270,75 @@ def test_mcp_malformed_backend_row_is_structured(monkeypatch):
     )
     result = mcp_server.run_search("safe")
     assert result == {"error": {"code": "search_failed", "type": "IndexError"}}
+
+
+def _explain_row(i: int = 1):
+    return {
+        "content": f"content-{i}",
+        "score": 0.9,
+        "timestamp": datetime(2026, 1, i, tzinfo=UTC),
+        "session_id": f"session-{i}",
+        "source_type": "main_user",
+        "embedding_model": "voyage-4-large",
+        "embedding_dimension": 1024,
+        "explain": {
+            "score_kind": "rrf",
+            "adjustments": [],
+            "channels": {
+                "dense": {"matched": True, "candidate_rank": 1},
+                "lexical": {"matched": True, "candidate_rank": 1},
+                "exact": {"matched": True, "candidate_rank": 1},
+            },
+            "matched_channel_count": 3,
+            "multi_channel": True,
+        },
+    }
+
+
+def test_search_page_explain_keeps_default_and_pagination(monkeypatch):
+    """Phase 4F1 slice2 genuine red (task #39).
+
+    ``query.search_page(..., explain=True)`` must return the same runtime
+    ``SearchPage`` type whose results are slice1-shaped structured dict rows
+    (each carrying the frozen explain literal), while the default
+    ``search_page`` (no explain) keeps returning tuple rows with identical
+    type/value/item order, and the pagination fields (limit/offset/has_more/
+    next_offset) plus the real look-ahead remain truthful in both paths.
+
+    The seam is the public ``query.search_page``; ``query.search`` is stubbed
+    to observe whether ``explain`` is forwarded and to return
+    ``offset+limit+1`` slice1-shaped dict rows.  No private helper/trace/PG.
+
+    On the current head this node fails ONLY because the public
+    ``search_page`` does not accept the ``explain`` keyword argument.
+    """
+    captured = {}
+
+    def fake_search(text, limit=5, *, explain=False):
+        captured["explain"] = explain
+        return [_explain_row(i) for i in range(1, limit + 1)]
+
+    monkeypatch.setattr(query, "search", fake_search)
+
+    default_before = query.search_page("explain", limit=2, offset=1)
+    explained = query.search_page("explain", limit=2, offset=1, explain=True)
+    default_after = query.search_page("explain", limit=2, offset=1)
+
+    # Default path: identical runtime type, tuple rows, item order.
+    assert type(default_after) is type(default_before)
+    assert default_after.results == default_before.results
+    assert isinstance(default_after.results, list) and all(isinstance(r, tuple) for r in default_after.results)
+
+    # Explained path: same SearchPage runtime type, dict rows with frozen literal.
+    assert type(explained) is type(default_before)
+    assert explained.results[0]["content"] == "content-2"
+    assert explained.results[0]["explain"] == _explain_row()["explain"]
+
+    # explain forwarded to the underlying public search.
+    assert captured["explain"] is True
+
+    # Pagination identical and truthful (look-ahead still real).
+    for field in ("limit", "offset", "has_more", "next_offset"):
+        assert getattr(explained, field) == getattr(default_before, field), field
+    assert explained.has_more is True
+    assert explained.next_offset == 3
