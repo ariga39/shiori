@@ -492,7 +492,7 @@ def test_search_page_explain_summary_zero_rows(db, mock_embed):
 
     assert default_page.explain_summary is None
     assert explained.explain_summary == {
-        "candidate_pool_limit": 50,
+        "candidate_pool_limit": 30,
         "channels": {
             "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
             "lexical": {
