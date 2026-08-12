@@ -156,5 +156,5 @@ def test_changelog_check_accepts_multiple_ordinary_fragments(tmp_path: Path) -> 
     assert draft.returncode == 0, draft.stderr
     assert draft.stdout.count("Features") == 1, draft.stdout
     assert draft.stdout.count("Bugfixes") == 1, draft.stdout
-    assert draft.stdout.count(feature) == 1, draft.stdout
-    assert draft.stdout.count(bugfix) == 1, draft.stdout
+    assert draft.stdout.count(f"{feature} (#42)") == 1, draft.stdout
+    assert draft.stdout.count(f"{bugfix} (#43)") == 1, draft.stdout
