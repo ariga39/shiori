@@ -226,3 +226,73 @@ def test_run_search_explain_preserves_default_and_contract(monkeypatch):
         # Frozen explain literal, with no provenance inside it.
         assert row["explain"] == _mcp_dict_row()["explain"]
         assert "provenance" not in row["explain"]
+
+
+def test_search_tool_schema_and_call_explain(server, monkeypatch):
+    """Phase 4F1 slice4 genuine red (task #39).
+
+    The public ``search`` tool schema must declare an optional ``explain``
+    parameter (boolean, default false) alongside the existing fields, and
+    ``call_tool("search", ...)`` must produce the same payload for omitted /
+    ``explain:false``, and for ``explain:true`` each result gains ONLY the
+    frozen explain sub-dict with pagination/provenance unchanged.
+
+    ``query.search_page`` is stubbed (tuple rows default, slice1-shaped dict
+    rows on explain=True).  No product/schema/_search_tool edits.
+
+    On the current head this node fails ONLY because the tool schema has no
+    ``explain`` property.
+    """
+    tools = _list_tools(server)
+    search = next(t for t in tools if t.name == "search")
+
+    # Schema first: existing fields unchanged, explain optional bool default false.
+    schema = search.inputSchema
+    props = schema["properties"]
+    for key in ("query", "limit", "offset", "source_types", "session_ids",
+                "time_from", "time_to"):
+        assert key in props
+    assert "explain" in props
+    assert props["explain"]["type"] == "boolean"
+    assert props["explain"].get("default") is False
+    assert schema["required"] == ["query"]
+
+    calls = []
+
+    def fake_search_page(text, *, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        rows = (
+            [_mcp_tuple_row(i) for i in range(1, limit + 1)]
+            if not explain
+            else [_mcp_dict_row(i) for i in range(1, limit + 1)]
+        )
+        return query.SearchPage(
+            results=rows,
+            limit=limit,
+            offset=offset,
+            has_more=True,
+            next_offset=offset + limit,
+        )
+
+    monkeypatch.setattr(query, "search_page", fake_search_page)
+
+    omitted = _parse(_call(server, "search", {"query": "probe"}))
+    false_explicit = _parse(_call(server, "search", {"query": "probe", "explain": False}))
+    true_explicit = _parse(_call(server, "search", {"query": "probe", "explain": True}))
+
+    assert false_explicit == omitted
+    assert list(false_explicit) == list(omitted)
+    assert calls == [False, False, True]
+
+    for key in ("limit", "offset", "has_more", "next_offset", "count"):
+        assert true_explicit[key] == omitted[key]
+    assert "error" not in true_explicit
+
+    assert len(true_explicit["results"]) == len(omitted["results"])
+    for row, ref in zip(true_explicit["results"], omitted["results"]):
+        row_without_explain = {k: v for k, v in row.items() if k != "explain"}
+        assert row_without_explain == ref
+        assert list(row_without_explain) == list(ref)
+        assert list(row) == [*list(ref), "explain"]
+        assert row["explain"] == _mcp_dict_row()["explain"]
+        assert "provenance" not in row["explain"]
