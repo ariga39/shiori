@@ -1237,19 +1237,11 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
 
     # Phase 4F1: opt-in explain output.  When disabled the default return path
     # is untouched (identical tuple list and order).  When enabled, each page
-    # row becomes a structured dict carrying the standard fields + provenance
-    # at top level and an ``explain`` sub-dict built from the REAL candidate
-    # pools (vector / lexical ts_rank_cd+trigram / exact), not a recomputation.
+    # row becomes a structured dict carrying the standard fields at top level
+    # and an ``explain`` sub-dict built from the REAL candidate pools (vector /
+    # lexical ts_rank_cd+trigram / exact), not a recomputation.
     if not explain:
         return page
-
-    # Temporal decay adjustments: report it only when Phase 4E2 decay actually
-    # applied (explicit time intent or a recognized recency-intent token).
-    adjustments = (
-        ["temporal_decay"]
-        if config.temporal and (_explicit_time_intent or _recency_intent)
-        else []
-    )
 
     # Build per-channel candidate rank maps from the real candidate pools.
     # Row id is column 0; rank is the 1-based position in that channel's pool.
@@ -1283,10 +1275,9 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
             "source_type": row[4],
             "embedding_model": row[5] if len(row) > 5 else None,
             "embedding_dimension": row[6] if len(row) > 6 else None,
-            "provenance": _row_provenance(row),
             "explain": {
                 "score_kind": "rrf",
-                "adjustments": adjustments,
+                "adjustments": [],
                 "channels": channels,
                 "matched_channel_count": matched_count,
                 "multi_channel": matched_count >= 2,
