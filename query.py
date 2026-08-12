@@ -1432,8 +1432,13 @@ def main(argv=None):
                 f"{name}#{chans[name]['candidate_rank']}"
                 for name in ("dense", "lexical", "exact")
             ]
+            adjustments = ex["adjustments"]
+            if adjustments == ["temporal_decay"]:
+                adj_text = "temporal_decay"
+            else:
+                adj_text = "none"
             print(
-                f"Explain: score={ex['score_kind']}; adjustments=none; "
+                f"Explain: score={ex['score_kind']}; adjustments={adj_text}; "
                 f"channels={','.join(parts)}; matched_channels={ex['matched_channel_count']}; "
                 f"multi_channel={str(ex['multi_channel']).lower()}"
             )
