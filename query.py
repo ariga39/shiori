@@ -1379,6 +1379,7 @@ def main(argv=None):
     parser.add_argument("--session-id", action="append", default=[], help="Filter by exact session_id (repeatable)")
     parser.add_argument("--time-from", default=None, help="UTC RFC3339 lower bound (inclusive on timestamp_start)")
     parser.add_argument("--time-to", default=None, help="UTC RFC3339 upper bound (exclusive on timestamp_start)")
+    parser.add_argument("--explain", action="store_true", help="Print per-result retrieval explain line")
     args = parser.parse_args(argv)
 
     settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
@@ -1392,19 +1393,42 @@ def main(argv=None):
         time_from=args.time_from,
         time_to=args.time_to,
     )
-    results = search(args.query, args.limit, args.offset, filters=filters)
+    if args.explain:
+        results = search(args.query, args.limit, args.offset, filters=filters, explain=True)
+    else:
+        results = search(args.query, args.limit, args.offset, filters=filters)
 
     if not results:
         print("No results found.")
         return
 
     for i, row in enumerate(results, 1):
-        content, score, ts, session_id, source_type = row[:5]
+        if args.explain:
+            content = row["content"]
+            score = row["score"]
+            ts = row["timestamp"]
+            session_id = row["session_id"]
+            source_type = row["source_type"]
+        else:
+            content, score, ts, session_id, source_type = row[:5]
         print(f"--- Result {i} (score: {score:.6f}, time: {ts}, type: {source_type}) ---")
         preview = content[:500]
         if len(content) > 500:
             preview += "..."
         print(preview)
+        if args.explain:
+            ex = row["explain"]
+            chans = ex["channels"]
+            parts = [
+                f"{name}#{chans[name]['candidate_rank'] if chans[name]['matched'] else '-'}"
+                for name in ("dense", "lexical", "exact")
+            ]
+            adjustments = "; ".join(ex["adjustments"]) if ex["adjustments"] else "none"
+            print(
+                f"Explain: score={ex['score_kind']}; adjustments={adjustments}; "
+                f"channels={','.join(parts)}; matched_channels={ex['matched_channel_count']}; "
+                f"multi_channel={str(ex['multi_channel']).lower()}"
+            )
         print()
 
 
