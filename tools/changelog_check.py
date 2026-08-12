@@ -71,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     changed = _changed_files(repo, args.base)
 
     waivers = [name for name in changed if WAIVER_RE.match(name)]
-    ordinary = [name for name in changed if FRAGMENT_RE.match(name)]
+    ordinary = [
+        name
+        for name in changed
+        if FRAGMENT_RE.match(name) and not WAIVER_RE.match(name)
+    ]
     other_changelog = [
         name
         for name in changed
