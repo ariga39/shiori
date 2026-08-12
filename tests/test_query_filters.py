@@ -966,3 +966,80 @@ def test_query_main_explain_prints_unmatched_channels(monkeypatch, capsys):
         "Explain: score=rrf; adjustments=none; channels=dense#1,lexical#-,exact#-; matched_channels=1; multi_channel=false\n"
         "\n"
     )
+
+
+class _ExplainCarrier(list):
+    """Minimal public list-compatible carrier with an explain_summary attr."""
+
+    def __init__(self, rows=(), *, explain_summary=None):
+        super().__init__(rows)
+        self.explain_summary = explain_summary
+
+
+_CLI_ZERO_ROW_SUMMARY = {
+    "candidate_pool_limit": 30,
+    "channels": {
+        "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+        "lexical": {
+            "executed": True,
+            "fetched_count": 0,
+            "at_pool_limit": False,
+            "method": "trigram_fallback",
+        },
+        "exact": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+    },
+    "fused_candidate_count": 0,
+    "selected_candidate_count": 0,
+    "returned_count": 0,
+}
+
+
+def test_query_main_explain_zero_row_summary(monkeypatch, capsys):
+    """Phase 4F1 slice13 genuine red (task #39).
+
+    ``query.main --explain`` with no results must print the original
+    ``No results found.`` anchor line followed by one frozen Explain summary
+    line, while the default path prints only ``No results found.`` (stderr
+    empty in both).  The frozen summary line:
+      Explain summary: pool_limit=30; dense=executed:true,fetched:0,at_limit:false;
+      lexical=executed:true,fetched:0,at_limit:false,method:trigram_fallback;
+      exact=executed:true,fetched:0,at_limit:false; fused=0; selected=0; returned=0
+
+    ``query.search`` is stubbed (plain empty list default; empty list-compatible
+    carrier carrying the frozen summary on ``explain=True``).  The expected
+    text is a complete human literal.
+
+    On the current head this node fails ONLY because the explain empty-result
+    path returns early with just the anchor line, missing the summary line.
+    """
+    import query as query_mod
+
+    calls = []
+
+    def fake_search(text, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        if explain:
+            return _ExplainCarrier(explain_summary=_CLI_ZERO_ROW_SUMMARY)
+        return []
+
+    monkeypatch.setattr(query_mod, "load_config", lambda **kw: _settings_stub())
+    monkeypatch.setattr(query_mod, "apply_settings", lambda settings: None)
+    monkeypatch.setattr(query_mod, "search", fake_search)
+
+    query_mod.main(["hello"])
+    default_out, default_err = capsys.readouterr()
+    assert default_err == ""
+    assert default_out == "No results found.\n"
+
+    query_mod.main(["hello", "--explain"])
+    explain_out, explain_err = capsys.readouterr()
+    assert explain_err == ""
+    assert calls == [False, True]
+    assert explain_out == (
+        "No results found.\n"
+        "Explain summary: pool_limit=30; "
+        "dense=executed:true,fetched:0,at_limit:false; "
+        "lexical=executed:true,fetched:0,at_limit:false,method:trigram_fallback; "
+        "exact=executed:true,fetched:0,at_limit:false; "
+        "fused=0; selected=0; returned=0\n"
+    )
