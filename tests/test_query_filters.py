@@ -903,12 +903,12 @@ def test_query_main_explain_prints_temporal_adjustment(monkeypatch, capsys):
 
     query_mod.main(["hello", "--explain"])
     out, err = capsys.readouterr()
-    assert err == ""
     assert out == (
         "--- Result 1 (score: 0.900000, time: 2026-08-01 00:00:00+00:00, type: main_user) ---\n"
-        "alpha beta\n"
+        "alpha beta\n\n"
+    )
+    assert err == (
         "Explain: score=rrf; adjustments=temporal_decay; channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true\n"
-        "\n"
     )
 
 
@@ -957,12 +957,12 @@ def test_query_main_explain_prints_unmatched_channels(monkeypatch, capsys):
 
     query_mod.main(["hello", "--explain"])
     out, err = capsys.readouterr()
-    assert err == ""
     assert out == (
         "--- Result 1 (score: 0.900000, time: 2026-08-01 00:00:00+00:00, type: main_user) ---\n"
-        "alpha beta\n"
+        "alpha beta\n\n"
+    )
+    assert err == (
         "Explain: score=rrf; adjustments=none; channels=dense#1,lexical#-,exact#-; matched_channels=1; multi_channel=false\n"
-        "\n"
     )
 
 
