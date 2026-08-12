@@ -8,13 +8,14 @@ Usage: python3 query.py "search query" [--limit N] [--offset N]
 
 import argparse
 import re
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from numbers import Real
-from typing import Any
+from typing import Any, Generic, Literal, TypeVar, cast, overload
 
 import numpy as np
 import psycopg2
@@ -191,15 +192,40 @@ def _emit_eval(stage: str, events: list[dict]) -> None:
         eval_ctx.errors.append(exc)
 
 
-@dataclass(frozen=True)
-class SearchPage:
-    """Bounded page returned by the public query service."""
+T = TypeVar("T")
 
-    results: list[tuple[Any, ...]]
+
+class _ExplainResult(list[T]):
+    """Explain-only internal carrier: a plain list that also carries the
+    frozen ``explain_summary`` (bounded-pool candidate counts) so an empty
+    result list can still transport it to ``search_page``.  This is not a
+    second public page type; ``search(..., explain=True)`` stays list-shaped."""
+
+    __slots__ = ("explain_summary",)
+
+    def __init__(self, rows=(), *, explain_summary=None):
+        super().__init__(rows)
+        self.explain_summary = explain_summary
+
+
+@dataclass(frozen=True)
+class SearchPage(Generic[T]):
+    """Bounded page returned by the public query service.
+
+    ``T`` is the row type: the default path carries legacy tuple rows, and the
+    opt-in ``explain=True`` path carries structured dict rows.  The pagination
+    fields are identical in both, so callers can treat the page uniformly.
+
+    ``explain_summary`` is an additive opt-in field: None on the default path,
+    and the frozen bounded-pool candidate summary when ``explain=True``.
+    """
+
+    results: list[T]
     limit: int
     offset: int
     has_more: bool
     next_offset: int | None
+    explain_summary: dict[str, Any] | None = None
 
 
 # Bounds for filter inputs (fail closed before SQL).
@@ -744,7 +770,7 @@ def _has_recency_intent(query_text: str) -> bool:
     return False
 
 
-def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | None = None):
+def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | None = None, explain: bool = False):
     query = _validate_query_text(query)
     limit, offset = _normalise_search_args(limit, offset)
     filters = _coerce_filters(filters)
@@ -1233,7 +1259,121 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
                     code="filter_leakage",
                 )
 
-    return selected[offset : offset + limit]
+    page = selected[offset : offset + limit]
+
+    # Phase 4F1: opt-in explain output.  When disabled the default return path
+    # is untouched (identical tuple list and order).  When enabled, each page
+    # row becomes a structured dict carrying the standard fields at top level
+    # and an ``explain`` sub-dict built from the REAL candidate pools (vector /
+    # lexical ts_rank_cd+trigram / exact), not a recomputation.
+    if not explain:
+        return page
+
+    # Temporal decay adjustment: report it exactly when the existing Phase 4E2
+    # branch applied (explicit time intent or a recognized recency-intent
+    # token); the formula/intent grammar/ranking are unchanged.
+    adjustments = (
+        ["temporal_decay"]
+        if config.temporal and (_explicit_time_intent or _recency_intent)
+        else []
+    )
+
+    # Build per-channel candidate rank maps from the real candidate pools.
+    # Row id is column 0; rank is the 1-based position in that channel's pool.
+    dense_rank = {row[0]: rank for rank, row in enumerate(vector_rows, start=1)}
+    lexical_rank = {row[0]: rank for rank, row in enumerate(bm25_rows, start=1)}
+    exact_rank = {row[0]: rank for rank, row in enumerate(exact_rows, start=1)}
+
+    explained: list[dict[str, Any]] = []
+    page_ids = selected_ids[offset : offset + len(page)]
+    for row, rid in zip(page, page_ids):
+        channels = {
+            "dense": {
+                "matched": rid in dense_rank,
+                "candidate_rank": dense_rank.get(rid),
+            },
+            "lexical": {
+                "matched": rid in lexical_rank,
+                "candidate_rank": lexical_rank.get(rid),
+            },
+            "exact": {
+                "matched": rid in exact_rank,
+                "candidate_rank": exact_rank.get(rid),
+            },
+        }
+        matched_count = sum(1 for c in channels.values() if c["matched"])
+        result: dict[str, Any] = {
+            "content": row[0],
+            "score": row[1],
+            "timestamp": row[2],
+            "session_id": row[3],
+            "source_type": row[4],
+            "embedding_model": row[5] if len(row) > 5 else None,
+            "embedding_dimension": row[6] if len(row) > 6 else None,
+            "explain": {
+                "score_kind": "rrf",
+                "adjustments": adjustments,
+                "channels": channels,
+                "matched_channel_count": matched_count,
+                "multi_channel": matched_count >= 2,
+            },
+        }
+        explained.append(result)
+
+    # Bounded-pool candidate summary (Phase 4F1): counts of rows actually
+    # fetched per channel from the REAL candidate pools, not DB-wide hits.
+    # executed distinguishes "channel not run" from "run but 0 hits"; the
+    # lexical method records whether the trigram fallback ran.
+    lexical_method = "trigram_fallback" if trigram_used else "ts_rank_cd"
+    if not config.lexical:
+        lexical_method = "none"
+    summary: dict[str, Any] = {
+        "candidate_pool_limit": pool,
+        "channels": {
+            "dense": {
+                "executed": config.dense,
+                "fetched_count": len(vector_rows),
+                "at_pool_limit": config.dense and len(vector_rows) >= pool,
+            },
+            "lexical": {
+                "executed": config.lexical,
+                "fetched_count": len(bm25_rows),
+                "at_pool_limit": config.lexical and len(bm25_rows) >= pool,
+                "method": lexical_method,
+            },
+            "exact": {
+                "executed": config.exact and len(query.strip()) <= 20,
+                "fetched_count": len(exact_rows),
+                "at_pool_limit": (config.exact and len(query.strip()) <= 20) and len(exact_rows) >= pool,
+            },
+        },
+        "fused_candidate_count": len(scores),
+        "selected_candidate_count": len(selected),
+        "returned_count": len(page),
+    }
+    return _ExplainResult(explained, explain_summary=summary)
+
+
+@overload
+def search_page(
+    query_text: str,
+    *,
+    limit: int = ...,
+    offset: int = ...,
+    filters: SearchFilters | None = ...,
+    explain: Literal[False] = ...,
+) -> SearchPage[tuple[Any, ...]]: ...
+
+
+@overload
+def search_page(
+    query_text: str,
+    *,
+    limit: int = ...,
+    offset: int = ...,
+    filters: SearchFilters | None = ...,
+    explain: Literal[True],
+) -> SearchPage[dict[str, Any]]: ...
 
 
 def search_page(
@@ -1242,8 +1382,14 @@ def search_page(
     limit: int = MAX_PAGE_LIMIT,
     offset: int = 0,
     filters: SearchFilters | None = None,
-) -> SearchPage:
-    """Return a bounded, stable page without exposing an unbounded count query."""
+    explain: bool = False,
+) -> SearchPage[tuple[Any, ...]] | SearchPage[dict[str, Any]]:
+    """Return a bounded, stable page without exposing an unbounded count query.
+
+    ``explain=False`` keeps the exact legacy call shape to ``search`` and
+    returns tuple rows; ``explain=True`` forwards the flag so ``search``
+    returns slice1 structured dict rows.  Pagination semantics are unchanged.
+    """
     query_text = _validate_query_text(query_text)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise QueryError("limit must be a positive integer", code="invalid_limit")
@@ -1255,18 +1401,33 @@ def search_page(
     # it without ``offset`` at zero keeps monkeypatched/legacy integrations
     # working while still making ``has_more`` truthful.
     requested = offset + limit + 1
-    if filters.is_empty:
-        all_rows = search(query_text, limit=requested)
+    if explain:
+        if filters.is_empty:
+            all_rows = search(query_text, limit=requested, explain=True)
+        else:
+            all_rows = search(query_text, limit=requested, filters=filters, explain=True)
     else:
-        all_rows = search(query_text, limit=requested, filters=filters)
+        if filters.is_empty:
+            all_rows = search(query_text, limit=requested)
+        else:
+            all_rows = search(query_text, limit=requested, filters=filters)
     page = all_rows[offset : offset + limit]
     has_more = len(all_rows) > offset + limit
+    if explain:
+        summary = getattr(all_rows, "explain_summary", None)
+        if summary is not None:
+            # returned_count is this page's row count, not the look-ahead rows.
+            summary = dict(summary)
+            summary["returned_count"] = len(page)
+    else:
+        summary = None
     return SearchPage(
         results=page,
         limit=limit,
         offset=offset,
         has_more=has_more,
         next_offset=offset + limit if has_more else None,
+        explain_summary=summary,
     )
 
 
@@ -1285,6 +1446,7 @@ def main(argv=None):
     parser.add_argument("--session-id", action="append", default=[], help="Filter by exact session_id (repeatable)")
     parser.add_argument("--time-from", default=None, help="UTC RFC3339 lower bound (inclusive on timestamp_start)")
     parser.add_argument("--time-to", default=None, help="UTC RFC3339 upper bound (exclusive on timestamp_start)")
+    parser.add_argument("--explain", action="store_true", help="Print per-result retrieval explain line")
     args = parser.parse_args(argv)
 
     settings = load_config(config_path=args.config, legacy_openclaw=args.legacy_openclaw)
@@ -1298,19 +1460,67 @@ def main(argv=None):
         time_from=args.time_from,
         time_to=args.time_to,
     )
-    results = search(args.query, args.limit, args.offset, filters=filters)
+    if args.explain:
+        results = search(args.query, args.limit, args.offset, filters=filters, explain=True)
+    else:
+        results = search(args.query, args.limit, args.offset, filters=filters)
 
     if not results:
         print("No results found.")
+        if args.explain:
+            summary = getattr(results, "explain_summary", None)
+            if summary is not None:
+                chans = summary["channels"]
+                dense = chans["dense"]
+                lexical = chans["lexical"]
+                exact = chans["exact"]
+                def _ch(c):
+                    return f"executed:{str(c['executed']).lower()},fetched:{c['fetched_count']},at_limit:{str(c['at_pool_limit']).lower()}"
+                print(
+                    f"Explain summary: pool_limit={summary['candidate_pool_limit']}; "
+                    f"dense={_ch(dense)}; "
+                    f"lexical={_ch(lexical)},method:{lexical['method']}; "
+                    f"exact={_ch(exact)}; "
+                    f"fused={summary['fused_candidate_count']}; "
+                    f"selected={summary['selected_candidate_count']}; "
+                    f"returned={summary['returned_count']}",
+                    file=sys.stderr,
+                )
         return
 
     for i, row in enumerate(results, 1):
-        content, score, ts, session_id, source_type = row[:5]
+        if args.explain:
+            explain_row = cast(dict[str, Any], row)
+            content = explain_row["content"]
+            score = explain_row["score"]
+            ts = explain_row["timestamp"]
+            session_id = explain_row["session_id"]
+            source_type = explain_row["source_type"]
+        else:
+            content, score, ts, session_id, source_type = row[:5]
         print(f"--- Result {i} (score: {score:.6f}, time: {ts}, type: {source_type}) ---")
         preview = content[:500]
         if len(content) > 500:
             preview += "..."
         print(preview)
+        if args.explain:
+            ex = cast(dict[str, Any], row)["explain"]
+            chans = ex["channels"]
+            parts = [
+                f"{name}#{chans[name]['candidate_rank'] if chans[name]['matched'] else '-'}"
+                for name in ("dense", "lexical", "exact")
+            ]
+            adjustments = ex["adjustments"]
+            if adjustments == ["temporal_decay"]:
+                adj_text = "temporal_decay"
+            else:
+                adj_text = "none"
+            print(
+                f"Explain: score={ex['score_kind']}; adjustments={adj_text}; "
+                f"channels={','.join(parts)}; matched_channels={ex['matched_channel_count']}; "
+                f"multi_channel={str(ex['multi_channel']).lower()}",
+                file=sys.stderr,
+            )
         print()
 
 

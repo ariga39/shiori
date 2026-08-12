@@ -47,6 +47,7 @@ def _build_parser() -> argparse.ArgumentParser:
     query.add_argument("--session-id", action="append", default=[], help="Filter by exact session_id (repeatable)")
     query.add_argument("--time-from", default=None, help="UTC RFC3339 lower bound (inclusive on timestamp_start)")
     query.add_argument("--time-to", default=None, help="UTC RFC3339 upper bound (exclusive on timestamp_start)")
+    query.add_argument("--explain", action="store_true", help="Print per-result retrieval explain line")
 
     serve = sub.add_parser("serve", help="run the read-only MCP server")
     _config_args(serve, suppress_default=True)
@@ -147,6 +148,8 @@ def _run_query(args: argparse.Namespace, settings: Settings) -> int:
         query_args.extend(["--time-from", args.time_from])
     if getattr(args, "time_to", None):
         query_args.extend(["--time-to", args.time_to])
+    if getattr(args, "explain", False):
+        query_args.append("--explain")
     query.main(query_args)
     return 0
 

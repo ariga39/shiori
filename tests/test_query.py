@@ -354,3 +354,197 @@ def test_short_name_escapes_like_wildcards(db, mock_embed):
     res = query.search("100%", limit=10)
     mine = [r for r in res if r[3] == sid]
     assert mine and "100%" in mine[0][0]
+
+
+def test_search_explain_multi_channel(db, mock_embed):
+    """Phase 4F1 slice1 genuine red (task #39).
+
+    A single doc that hits all three real candidate channels (dense + lexical
+    ts_rank_cd + exact substring) at candidate_rank 1 must, when
+    ``query.search(..., explain=True)`` is requested, return a structured
+    explain object with the frozen literal shape:
+    score_kind="rrf", adjustments=[] (no temporal intent), a fixed three-key
+    channels map (dense/lexical/exact each {matched, candidate_rank}),
+    matched_channel_count=3 and multi_channel=True.
+
+    The default ``query.search()`` (no explain) must keep returning the same
+    list of tuples with identical type/value/order before and after the
+    explain request.
+
+    On the current main this node fails ONLY because the public ``search()``
+    does not accept the ``explain`` keyword argument (TypeError), before any
+    assertion is reached.
+    """
+    conn, prefix = db
+    sid = prefix + "-explain"
+    now = datetime.now(UTC)
+    # A single human-checkable doc: dense cos=1.0 (doc emb == query emb),
+    # lexical ts_rank_cd hits ('snowflake' & 'report'), exact ILIKE hits
+    # (query len 16 <= 20, substring present).  Typed session filter isolates
+    # it as the only candidate so each channel ranks it 1.
+    _insert(conn, sid, "snowflake report is an explicit token test", QUERY_EMB, now)
+    filters = SearchFilters.from_inputs(session_ids=[sid])
+
+    default_before = query.search("snowflake report", limit=20, filters=filters)
+
+    explained = query.search(
+        "snowflake report", limit=20, filters=filters, explain=True
+    )
+
+    default_after = query.search("snowflake report", limit=20, filters=filters)
+
+    # Default path unchanged: identical type/value/order.
+    assert default_after == default_before
+    assert isinstance(default_after, list) and all(isinstance(r, tuple) for r in default_after)
+
+    # Frozen explain literal shape (human-written, not derived from a private
+    # trace or helper).
+    assert explained[0]["content"] == "snowflake report is an explicit token test"
+    assert explained[0]["explain"] == {
+        "score_kind": "rrf",
+        "adjustments": [],
+        "channels": {
+            "dense": {"matched": True, "candidate_rank": 1},
+            "lexical": {"matched": True, "candidate_rank": 1},
+            "exact": {"matched": True, "candidate_rank": 1},
+        },
+        "matched_channel_count": 3,
+        "multi_channel": True,
+    }
+
+
+def test_search_explain_reports_temporal_decay(db, mock_embed):
+    """Phase 4F1 slice7 genuine red (task #39).
+
+    Under an explicit time bound on the typed ``SearchFilters`` (Phase 4E2
+    intent) the existing unchanged decay formula applies, so ``explain=True``
+    must report ``adjustments == ["temporal_decay"]`` while the three channels
+    keep ``candidate_rank == 1`` and the default ``search()`` result
+    type/value/order is unchanged.
+
+    Single human-checkable doc, real isolated PostgreSQL, replay-free mock
+    embedding; no private intent/trace/helper used.
+
+    On the current head this node fails because the explain output hard-codes
+    ``adjustments == []`` instead of the temporal decay adjustment.
+    """
+    conn, prefix = db
+    sid = prefix + "-temporal-explain"
+    now = datetime.now(UTC)
+    _insert(conn, sid, "snowflake report is an explicit token test", QUERY_EMB, now)
+    filters = SearchFilters.from_inputs(
+        session_ids=[sid],
+        time_from=now - timedelta(days=60),
+    )
+
+    default_before = query.search("snowflake report", limit=20, filters=filters)
+    explained = query.search("snowflake report", limit=20, filters=filters, explain=True)
+    default_after = query.search("snowflake report", limit=20, filters=filters)
+
+    assert isinstance(default_after, list) and all(isinstance(r, tuple) for r in default_after)
+    assert [r[0] for r in default_after] == [r[0] for r in default_before]
+    assert [r[3] for r in default_after] == [r[3] for r in default_before]
+    assert default_after, "explicit time bound must still return the doc"
+
+    assert explained[0]["content"] == "snowflake report is an explicit token test"
+    assert explained[0]["explain"] == {
+        "score_kind": "rrf",
+        "adjustments": ["temporal_decay"],
+        "channels": {
+            "dense": {"matched": True, "candidate_rank": 1},
+            "lexical": {"matched": True, "candidate_rank": 1},
+            "exact": {"matched": True, "candidate_rank": 1},
+        },
+        "matched_channel_count": 3,
+        "multi_channel": True,
+    }
+
+
+def test_search_page_explain_summary_zero_rows(db, mock_embed):
+    """Phase 4F1 slice10 genuine red (task #39).
+
+    With a typed session filter selecting a session that has no rows, both the
+    default ``search_page`` and ``search_page(..., explain=True)`` must return
+    the same runtime ``SearchPage`` with empty results and identical pagination
+    fields; the default page's ``explain_summary`` is None, and the explain
+    page carries the frozen zero-row summary (all channels executed with 0
+    fetched, lexical trigram fallback, fused/selected/returned all 0).
+
+    Human literal expected; real isolated PostgreSQL.  No private
+    trace/helper used.
+
+    On the current head this node fails ONLY because ``SearchPage`` has no
+    public ``explain_summary`` field.
+    """
+    conn, prefix = db
+    sid = prefix + "-empty-summary"
+    # Do NOT insert any row; the typed session filter selects an empty pool.
+
+    filters = SearchFilters.from_inputs(session_ids=[sid])
+    default_page = query.search_page("summary probe", limit=2, filters=filters)
+    explained = query.search_page("summary probe", limit=2, filters=filters, explain=True)
+
+    assert type(explained) is type(default_page)
+    assert default_page.results == []
+    assert explained.results == []
+    for field in ("limit", "offset", "has_more", "next_offset"):
+        assert getattr(explained, field) == getattr(default_page, field), field
+
+    assert default_page.explain_summary is None
+    assert explained.explain_summary == {
+        "candidate_pool_limit": 30,
+        "channels": {
+            "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+            "lexical": {
+                "executed": True,
+                "fetched_count": 0,
+                "at_pool_limit": False,
+                "method": "trigram_fallback",
+            },
+            "exact": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+        },
+        "fused_candidate_count": 0,
+        "selected_candidate_count": 0,
+        "returned_count": 0,
+    }
+
+
+def test_search_page_explain_summary_exact_not_executed(db, mock_embed):
+    """Phase 4F1 slice11 genuine red (task #39).
+
+    With an empty typed session filter and a query longer than 20 characters,
+    the exact-substring channel does NOT run, so the frozen summary must report
+    ``channels.exact == {executed: False, fetched_count: 0, at_pool_limit:
+    False}`` while dense and lexical (real trigram fallback) still report
+    executed with 0 fetched and the other counts are 0.
+
+    On the current head this node fails ONLY because ``exact.executed`` is
+    hard-set to ``config.exact`` (True) instead of reflecting whether the
+    exact path actually ran.
+    """
+    conn, prefix = db
+    sid = prefix + "-empty-exact-not-run"
+    # Do NOT insert any row; a >20-char query skips the exact channel.
+    filters = SearchFilters.from_inputs(session_ids=[sid])
+
+    explained = query.search_page(
+        "summary probe with more than twenty characters", limit=2, filters=filters, explain=True
+    )
+
+    assert explained.results == []
+    assert explained.explain_summary == {
+        "candidate_pool_limit": 30,
+        "channels": {
+            "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+            "lexical": {
+                "executed": True,
+                "fetched_count": 0,
+                "at_pool_limit": False,
+                "method": "trigram_fallback",
+            },
+            "exact": {"executed": False, "fetched_count": 0, "at_pool_limit": False},
+        },
+        "fused_candidate_count": 0,
+        "selected_candidate_count": 0,
+        "returned_count": 0,
+    }
