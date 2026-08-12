@@ -296,3 +296,69 @@ def test_search_tool_schema_and_call_explain(server, monkeypatch):
         assert list(row) == [*list(ref), "explain"]
         assert row["explain"] == _mcp_dict_row()["explain"]
         assert "provenance" not in row["explain"]
+
+
+_MCP_ZERO_ROW_SUMMARY = {
+    "candidate_pool_limit": 30,
+    "channels": {
+        "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+        "lexical": {
+            "executed": True,
+            "fetched_count": 0,
+            "at_pool_limit": False,
+            "method": "trigram_fallback",
+        },
+        "exact": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+    },
+    "fused_candidate_count": 0,
+    "selected_candidate_count": 0,
+    "returned_count": 0,
+}
+
+
+def test_run_search_explain_summary_zero_rows(monkeypatch):
+    """Phase 4F1 slice12 genuine red (task #39).
+
+    ``mcp_server.run_search(..., explain=True)`` on an empty result must add a
+    top-level ``explain_summary`` equal to the frozen zero-row literal, while
+    omitted/``explain=False`` payloads stay identical to each other and carry
+    NO ``explain_summary`` key.  Pagination/count fields and their order are
+    unchanged on the true path.
+
+    ``query.search_page`` is stubbed (tuple empty page default; empty page with
+    the frozen explain_summary on True).  No product/schema/_search_tool edits.
+
+    On the current head this node fails ONLY because the explain=True payload
+    has no top-level ``explain_summary`` key.
+    """
+    calls = []
+
+    def fake_search_page(text, *, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        return query.SearchPage(
+            results=[],
+            limit=limit,
+            offset=offset,
+            has_more=False,
+            next_offset=None,
+            explain_summary=_MCP_ZERO_ROW_SUMMARY if explain else None,
+        )
+
+    monkeypatch.setattr(query, "search_page", fake_search_page)
+
+    omitted = mcp_server.run_search("probe")
+    false_explicit = mcp_server.run_search("probe", explain=False)
+    true_explicit = mcp_server.run_search("probe", explain=True)
+
+    assert false_explicit == omitted
+    assert list(false_explicit) == list(omitted)
+    assert "explain_summary" not in omitted
+    assert "explain_summary" not in false_explicit
+    assert calls == [False, False, True]
+
+    # true payload: existing fields unchanged, explain_summary appended last.
+    assert list(true_explicit) == [*list(omitted), "explain_summary"]
+    for key in ("results", "count", "limit", "offset", "has_more", "next_offset"):
+        assert true_explicit[key] == omitted[key]
+    assert true_explicit["explain_summary"] == _MCP_ZERO_ROW_SUMMARY
+    assert "error" not in true_explicit
