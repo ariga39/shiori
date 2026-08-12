@@ -912,3 +912,57 @@ def test_query_main_explain_prints_temporal_adjustment(monkeypatch, capsys):
         "Explain: score=rrf; adjustments=temporal_decay; channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true\n"
         "\n"
     )
+
+
+def test_query_main_explain_prints_unmatched_channels(monkeypatch, capsys):
+    """Phase 4F1 slice9 genuine red (task #39).
+
+    ``query.main --explain`` must render unmatched channels (matched=False,
+    candidate_rank=None) as ``#-`` in the frozen Explain line, with the rest of
+    the line/header/content/blank-line positions strictly unchanged and stderr
+    empty.  The expected stdout is a complete human literal.
+
+    On the current head this node fails ONLY because the formatter prints the
+    raw None for unmatched candidate_rank (``lexical#None,exact#None``).
+    """
+    import query as query_mod
+
+    row_ts = T0
+
+    def fake_search(text, limit=5, offset=0, filters=None, explain=False):
+        if explain:
+            return [{
+                "content": "alpha beta",
+                "score": 0.9,
+                "timestamp": row_ts,
+                "session_id": "s1",
+                "source_type": "main_user",
+                "embedding_model": "voyage-4-large",
+                "embedding_dimension": 1024,
+                "explain": {
+                    "score_kind": "rrf",
+                    "adjustments": [],
+                    "channels": {
+                        "dense": {"matched": True, "candidate_rank": 1},
+                        "lexical": {"matched": False, "candidate_rank": None},
+                        "exact": {"matched": False, "candidate_rank": None},
+                    },
+                    "matched_channel_count": 1,
+                    "multi_channel": False,
+                },
+            }]
+        return [("alpha beta", 0.9, row_ts, "s1", "main_user", "voyage-4-large", 1024)]
+
+    monkeypatch.setattr(query_mod, "load_config", lambda **kw: _settings_stub())
+    monkeypatch.setattr(query_mod, "apply_settings", lambda settings: None)
+    monkeypatch.setattr(query_mod, "search", fake_search)
+
+    query_mod.main(["hello", "--explain"])
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert out == (
+        "--- Result 1 (score: 0.900000, time: 2026-08-01 00:00:00+00:00, type: main_user) ---\n"
+        "alpha beta\n"
+        "Explain: score=rrf; adjustments=none; channels=dense#1,lexical#-,exact#-; matched_channels=1; multi_channel=false\n"
+        "\n"
+    )
