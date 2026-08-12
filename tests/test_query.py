@@ -507,3 +507,44 @@ def test_search_page_explain_summary_zero_rows(db, mock_embed):
         "selected_candidate_count": 0,
         "returned_count": 0,
     }
+
+
+def test_search_page_explain_summary_exact_not_executed(db, mock_embed):
+    """Phase 4F1 slice11 genuine red (task #39).
+
+    With an empty typed session filter and a query longer than 20 characters,
+    the exact-substring channel does NOT run, so the frozen summary must report
+    ``channels.exact == {executed: False, fetched_count: 0, at_pool_limit:
+    False}`` while dense and lexical (real trigram fallback) still report
+    executed with 0 fetched and the other counts are 0.
+
+    On the current head this node fails ONLY because ``exact.executed`` is
+    hard-set to ``config.exact`` (True) instead of reflecting whether the
+    exact path actually ran.
+    """
+    conn, prefix = db
+    sid = prefix + "-empty-exact-not-run"
+    # Do NOT insert any row; a >20-char query skips the exact channel.
+    filters = SearchFilters.from_inputs(session_ids=[sid])
+
+    explained = query.search_page(
+        "summary probe with more than twenty characters", limit=2, filters=filters, explain=True
+    )
+
+    assert explained.results == []
+    assert explained.explain_summary == {
+        "candidate_pool_limit": 30,
+        "channels": {
+            "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+            "lexical": {
+                "executed": True,
+                "fetched_count": 0,
+                "at_pool_limit": False,
+                "method": "trigram_fallback",
+            },
+            "exact": {"executed": False, "fetched_count": 0, "at_pool_limit": False},
+        },
+        "fused_candidate_count": 0,
+        "selected_candidate_count": 0,
+        "returned_count": 0,
+    }
