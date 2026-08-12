@@ -96,10 +96,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"changelog-check: waiver {issue} accepted")
             return 0
 
-    if not waivers and len(ordinary) == 1:
-        content = (repo / ordinary[0]).read_text(encoding="utf-8").strip()
-        if content and content in draft.stdout:
-            print(f"changelog-check: fragment {Path(ordinary[0]).name} accepted")
+    if not waivers and ordinary:
+        contents = [(repo / name).read_text(encoding="utf-8").strip() for name in ordinary]
+        if all(content and draft.stdout.count(content) == 1 for content in contents):
+            if len(ordinary) == 1:
+                print(f"changelog-check: fragment {Path(ordinary[0]).name} accepted")
+            else:
+                print(f"changelog-check: {len(ordinary)} fragments accepted")
             return 0
 
     print(REJECT, file=sys.stderr)
