@@ -120,3 +120,109 @@ def test_search_failure_mapped_to_readable_error(server, monkeypatch):
     data = _parse(result)
     assert data["error"] == {"code": "search_failed", "type": "RuntimeError"}
     assert "synthetic-secret" not in json.dumps(data)
+
+
+def _mcp_tuple_row(i=1):
+    return (
+        f"content-{i}",
+        0.9,
+        datetime(2026, 1, i, tzinfo=UTC),
+        f"session-{i}",
+        "main_user",
+        "voyage-4-large",
+        1024,
+    )
+
+
+def _mcp_dict_row(i=1):
+    return {
+        "content": f"content-{i}",
+        "score": 0.9,
+        "timestamp": "2026-01-01T00:00:00+00:00",
+        "session_id": f"session-{i}",
+        "source_type": "main_user",
+        "embedding_model": "voyage-4-large",
+        "embedding_dimension": 1024,
+        "provenance": {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "session_id": f"session-{i}",
+            "source_type": "main_user",
+            "embedding_model": "voyage-4-large",
+            "embedding_dimension": 1024,
+        },
+        "explain": {
+            "score_kind": "rrf",
+            "adjustments": [],
+            "channels": {
+                "dense": {"matched": True, "candidate_rank": 1},
+                "lexical": {"matched": True, "candidate_rank": 1},
+                "exact": {"matched": True, "candidate_rank": 1},
+            },
+            "matched_channel_count": 3,
+            "multi_channel": True,
+        },
+    }
+
+
+def test_run_search_explain_preserves_default_and_contract(monkeypatch):
+    """Phase 4F1 slice3 genuine red (task #39).
+
+    ``mcp_server.run_search(..., explain=True)`` must produce the same JSON
+    payload shape as the default (same pagination/count fields), with each
+    result keeping its existing top-level fields and ``provenance`` unchanged
+    and gaining ONLY the frozen ``explain`` sub-dict (no provenance inside
+    explain).  ``explain=False`` and the omitted form must produce identical
+    payload dicts (key/value/iteration order equal).
+
+    The seam is public ``mcp_server.run_search``; ``query.search_page`` is
+    stubbed to record calls and return tuple rows by default / slice1-shaped
+    dict rows (full top-level fields + provenance + frozen explain) when
+    ``explain=True``.  No product-code/schema/_search_tool edits.
+
+    On the current head this node fails ONLY because public ``run_search``
+    does not accept an ``explain`` keyword argument.
+    """
+    calls = []
+
+    def fake_search_page(text, *, limit=5, offset=0, filters=None, explain=False):
+        calls.append(explain)
+        rows = (
+            [_mcp_tuple_row(i) for i in range(1, limit + 1)]
+            if not explain
+            else [_mcp_dict_row(i) for i in range(1, limit + 1)]
+        )
+        return query.SearchPage(
+            results=rows,
+            limit=limit,
+            offset=offset,
+            has_more=True,
+            next_offset=offset + limit,
+        )
+
+    monkeypatch.setattr(query, "search_page", fake_search_page)
+
+    omitted = mcp_server.run_search("probe")
+    false_explicit = mcp_server.run_search("probe", explain=False)
+    true_explicit = mcp_server.run_search("probe", explain=True)
+
+    # omitted and explain=False payload dicts are fully identical.
+    assert false_explicit == omitted
+    assert list(false_explicit) == list(omitted)
+    assert calls == [False, False, True]
+
+    # true payload keeps pagination/count fields; results grow only explain.
+    for key in ("limit", "offset", "has_more", "next_offset", "count"):
+        assert true_explicit[key] == omitted[key]
+    assert "error" not in true_explicit
+
+    assert len(true_explicit["results"]) == len(omitted["results"])
+    for row, ref in zip(true_explicit["results"], omitted["results"]):
+        assert row["content"] == ref["content"]
+        assert row["score"] == ref["score"]
+        # Existing top-level fields and provenance unchanged.
+        for key in ("timestamp", "session_id", "source_type",
+                    "embedding_model", "embedding_dimension", "provenance"):
+            assert row[key] == ref[key]
+        # Frozen explain added, with no provenance inside it.
+        assert row["explain"] == _mcp_dict_row()["explain"]
+        assert "provenance" not in row["explain"]
