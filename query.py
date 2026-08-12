@@ -1251,6 +1251,15 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
     if not explain:
         return page
 
+    # Temporal decay adjustment: report it exactly when the existing Phase 4E2
+    # branch applied (explicit time intent or a recognized recency-intent
+    # token); the formula/intent grammar/ranking are unchanged.
+    adjustments = (
+        ["temporal_decay"]
+        if config.temporal and (_explicit_time_intent or _recency_intent)
+        else []
+    )
+
     # Build per-channel candidate rank maps from the real candidate pools.
     # Row id is column 0; rank is the 1-based position in that channel's pool.
     dense_rank = {row[0]: rank for rank, row in enumerate(vector_rows, start=1)}
@@ -1285,7 +1294,7 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
             "embedding_dimension": row[6] if len(row) > 6 else None,
             "explain": {
                 "score_kind": "rrf",
-                "adjustments": [],
+                "adjustments": adjustments,
                 "channels": channels,
                 "matched_channel_count": matched_count,
                 "multi_channel": matched_count >= 2,
