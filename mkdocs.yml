@@ -1,0 +1,20 @@
+site_name: Shiori
+
+theme:
+  name: mkdocs
+
+extra:
+  raw_docs_base_url: https://raw.githubusercontent.com/ariga39/shiori/main/docs/
+
+nav:
+  - Home: index.md
+  - User guide:
+      - Getting started: getting-started.md
+      - Configuration: CONFIGURATION.md
+      - Privacy: privacy-policy.md
+  - Contributing: contributing.md
+  - Reference:
+      - CLI and MCP: cli-mcp-reference.md
+      - Design: DESIGN.md
+      - Atomic rebuild ADR: adr/0001-atomic-rebuild-on-partial-embed-failure.md
+      - Release checklist: RELEASE_CHECKLIST.md
