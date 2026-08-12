@@ -458,3 +458,52 @@ def test_search_explain_reports_temporal_decay(db, mock_embed):
         "matched_channel_count": 3,
         "multi_channel": True,
     }
+
+
+def test_search_page_explain_summary_zero_rows(db, mock_embed):
+    """Phase 4F1 slice10 genuine red (task #39).
+
+    With a typed session filter selecting a session that has no rows, both the
+    default ``search_page`` and ``search_page(..., explain=True)`` must return
+    the same runtime ``SearchPage`` with empty results and identical pagination
+    fields; the default page's ``explain_summary`` is None, and the explain
+    page carries the frozen zero-row summary (all channels executed with 0
+    fetched, lexical trigram fallback, fused/selected/returned all 0).
+
+    Human literal expected; real isolated PostgreSQL.  No private
+    trace/helper used.
+
+    On the current head this node fails ONLY because ``SearchPage`` has no
+    public ``explain_summary`` field.
+    """
+    conn, prefix = db
+    sid = prefix + "-empty-summary"
+    # Do NOT insert any row; the typed session filter selects an empty pool.
+
+    filters = SearchFilters.from_inputs(session_ids=[sid])
+    default_page = query.search_page("summary probe", limit=2, filters=filters)
+    explained = query.search_page("summary probe", limit=2, filters=filters, explain=True)
+
+    assert type(explained) is type(default_page)
+    assert default_page.results == []
+    assert explained.results == []
+    for field in ("limit", "offset", "has_more", "next_offset"):
+        assert getattr(explained, field) == getattr(default_page, field), field
+
+    assert default_page.explain_summary is None
+    assert explained.explain_summary == {
+        "candidate_pool_limit": 50,
+        "channels": {
+            "dense": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+            "lexical": {
+                "executed": True,
+                "fetched_count": 0,
+                "at_pool_limit": False,
+                "method": "trigram_fallback",
+            },
+            "exact": {"executed": True, "fetched_count": 0, "at_pool_limit": False},
+        },
+        "fused_candidate_count": 0,
+        "selected_candidate_count": 0,
+        "returned_count": 0,
+    }
