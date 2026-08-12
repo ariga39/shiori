@@ -12,7 +12,6 @@ from urllib.parse import quote, urlparse
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "mkdocs.yml"
 OUTPUTS = (ROOT / "llms.txt", ROOT / "docs" / "llms.txt")
