@@ -997,10 +997,10 @@ _CLI_ZERO_ROW_SUMMARY = {
 def test_query_main_explain_zero_row_summary(monkeypatch, capsys):
     """Phase 4F1 slice13 genuine red (task #39).
 
-    ``query.main --explain`` with no results must print the original
-    ``No results found.`` anchor line followed by one frozen Explain summary
-    line, while the default path prints only ``No results found.`` (stderr
-    empty in both).  The frozen summary line:
+    ``query.main --explain`` with no results keeps stdout strictly as the
+    original ``No results found.`` anchor (pipe-clean) and writes the frozen
+    ``Explain summary: ...`` line to STDERR, while the default path prints only
+    the anchor with empty stderr.  The frozen summary line:
       Explain summary: pool_limit=30; dense=executed:true,fetched:0,at_limit:false;
       lexical=executed:true,fetched:0,at_limit:false,method:trigram_fallback;
       exact=executed:true,fetched:0,at_limit:false; fused=0; selected=0; returned=0
@@ -1010,7 +1010,7 @@ def test_query_main_explain_zero_row_summary(monkeypatch, capsys):
     text is a complete human literal.
 
     On the current head this node fails ONLY because the explain empty-result
-    path returns early with just the anchor line, missing the summary line.
+    path prints nothing to stderr (missing the summary line).
     """
     import query as query_mod
 
@@ -1033,10 +1033,10 @@ def test_query_main_explain_zero_row_summary(monkeypatch, capsys):
 
     query_mod.main(["hello", "--explain"])
     explain_out, explain_err = capsys.readouterr()
-    assert explain_err == ""
     assert calls == [False, True]
-    assert explain_out == (
-        "No results found.\n"
+    # stdout stays pipe-clean; the frozen diagnostic line goes to stderr.
+    assert explain_out == "No results found.\n"
+    assert explain_err == (
         "Explain summary: pool_limit=30; "
         "dense=executed:true,fetched:0,at_limit:false; "
         "lexical=executed:true,fetched:0,at_limit:false,method:trigram_fallback; "
