@@ -744,7 +744,7 @@ def _has_recency_intent(query_text: str) -> bool:
     return False
 
 
-def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | None = None):
+def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | None = None, explain: bool = False):
     query = _validate_query_text(query)
     limit, offset = _normalise_search_args(limit, offset)
     filters = _coerce_filters(filters)
@@ -1233,7 +1233,68 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
                     code="filter_leakage",
                 )
 
-    return selected[offset : offset + limit]
+    page = selected[offset : offset + limit]
+
+    # Phase 4F1: opt-in explain output.  When disabled the default return path
+    # is untouched (identical tuple list and order).  When enabled, each page
+    # row becomes a structured dict carrying the standard fields + provenance
+    # at top level and an ``explain`` sub-dict built from the REAL candidate
+    # pools (vector / lexical ts_rank_cd+trigram / exact), not a recomputation.
+    if not explain:
+        return page
+
+    # Temporal decay adjustments: report it only when Phase 4E2 decay actually
+    # applied (explicit time intent or a recognized recency-intent token).
+    adjustments = (
+        ["temporal_decay"]
+        if config.temporal and (_explicit_time_intent or _recency_intent)
+        else []
+    )
+
+    # Build per-channel candidate rank maps from the real candidate pools.
+    # Row id is column 0; rank is the 1-based position in that channel's pool.
+    dense_rank = {row[0]: rank for rank, row in enumerate(vector_rows, start=1)}
+    lexical_rank = {row[0]: rank for rank, row in enumerate(bm25_rows, start=1)}
+    exact_rank = {row[0]: rank for rank, row in enumerate(exact_rows, start=1)}
+
+    explained: list[dict[str, Any]] = []
+    page_ids = selected_ids[offset : offset + len(page)]
+    for row, rid in zip(page, page_ids):
+        channels = {
+            "dense": {
+                "matched": rid in dense_rank,
+                "candidate_rank": dense_rank.get(rid),
+            },
+            "lexical": {
+                "matched": rid in lexical_rank,
+                "candidate_rank": lexical_rank.get(rid),
+            },
+            "exact": {
+                "matched": rid in exact_rank,
+                "candidate_rank": exact_rank.get(rid),
+            },
+        }
+        matched_count = sum(1 for c in channels.values() if c["matched"])
+        result: dict[str, Any] = {
+            "content": row[0],
+            "score": row[1],
+            "timestamp": row[2],
+            "session_id": row[3],
+            "source_type": row[4],
+            "embedding_model": row[5] if len(row) > 5 else None,
+            "embedding_dimension": row[6] if len(row) > 6 else None,
+            "provenance": _row_provenance(row),
+            "explain": {
+                "score_kind": "rrf",
+                "adjustments": adjustments,
+                "channels": channels,
+                "matched_channel_count": matched_count,
+                "multi_channel": matched_count >= 2,
+            },
+        }
+        explained.append(result)
+
+    return explained
 
 
 def search_page(
