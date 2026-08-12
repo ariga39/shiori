@@ -30,3 +30,30 @@ def test_docs_site_builds_strict_from_navigation(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert "Shiori" in (site_dir / "index.html").read_text(encoding="utf-8")
+
+
+def test_docs_site_navigation_exposes_existing_markdown(tmp_path: Path) -> None:
+    """The built homepage must expose every existing documentation page in order."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mkdocs", "build", "--strict", "--site-dir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    homepage = (site_dir / "index.html").read_text(encoding="utf-8")
+    expected_hrefs = [
+        'href="."',
+        'href="CONFIGURATION/"',
+        'href="privacy-policy/"',
+        'href="DESIGN/"',
+        'href="adr/0001-atomic-rebuild-on-partial-embed-failure/"',
+        'href="RELEASE_CHECKLIST/"',
+    ]
+    positions = [homepage.find(href) for href in expected_hrefs]
+    assert all(position >= 0 for position in positions), positions
+    assert positions == sorted(positions), positions
