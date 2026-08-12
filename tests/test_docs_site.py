@@ -323,3 +323,24 @@ def test_docs_contributing_explains_changelog_fragments(tmp_path: Path) -> None:
         "not be mixed with ordinary fragments."
         in page
     )
+
+
+def test_starlight_site_builds_bilingual_homepages(tmp_path: Path) -> None:
+    """The public Starlight build must render English and Simplified Chinese homepages."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    assert "Searchable long-term memory for AI agents." in english
+    assert "面向 AI 智能体的可搜索长期记忆。" not in english
+    assert "面向 AI 智能体的可搜索长期记忆。" in chinese
+    assert "Searchable long-term memory for AI agents." not in chinese
