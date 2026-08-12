@@ -1,0 +1,7 @@
+site_name: Shiori
+
+theme:
+  name: mkdocs
+
+nav:
+  - Home: index.md
