@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from numbers import Real
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 import psycopg2
@@ -191,11 +191,19 @@ def _emit_eval(stage: str, events: list[dict]) -> None:
         eval_ctx.errors.append(exc)
 
 
-@dataclass(frozen=True)
-class SearchPage:
-    """Bounded page returned by the public query service."""
+T = TypeVar("T")
 
-    results: list[tuple[Any, ...]]
+
+@dataclass(frozen=True)
+class SearchPage(Generic[T]):
+    """Bounded page returned by the public query service.
+
+    ``T`` is the row type: the default path carries legacy tuple rows, and the
+    opt-in ``explain=True`` path carries structured dict rows.  The pagination
+    fields are identical in both, so callers can treat the page uniformly.
+    """
+
+    results: list[T]
     limit: int
     offset: int
     has_more: bool
@@ -1294,8 +1302,14 @@ def search_page(
     limit: int = MAX_PAGE_LIMIT,
     offset: int = 0,
     filters: SearchFilters | None = None,
-) -> SearchPage:
-    """Return a bounded, stable page without exposing an unbounded count query."""
+    explain: bool = False,
+) -> SearchPage[Any]:
+    """Return a bounded, stable page without exposing an unbounded count query.
+
+    ``explain=False`` keeps the exact legacy call shape to ``search`` and
+    returns tuple rows; ``explain=True`` forwards the flag so ``search``
+    returns slice1 structured dict rows.  Pagination semantics are unchanged.
+    """
     query_text = _validate_query_text(query_text)
     if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
         raise QueryError("limit must be a positive integer", code="invalid_limit")
@@ -1307,10 +1321,16 @@ def search_page(
     # it without ``offset`` at zero keeps monkeypatched/legacy integrations
     # working while still making ``has_more`` truthful.
     requested = offset + limit + 1
-    if filters.is_empty:
-        all_rows = search(query_text, limit=requested)
+    if explain:
+        if filters.is_empty:
+            all_rows = search(query_text, limit=requested, explain=True)
+        else:
+            all_rows = search(query_text, limit=requested, filters=filters, explain=True)
     else:
-        all_rows = search(query_text, limit=requested, filters=filters)
+        if filters.is_empty:
+            all_rows = search(query_text, limit=requested)
+        else:
+            all_rows = search(query_text, limit=requested, filters=filters)
     page = all_rows[offset : offset + limit]
     has_more = len(all_rows) > offset + limit
     return SearchPage(
