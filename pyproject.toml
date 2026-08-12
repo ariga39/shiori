@@ -26,6 +26,7 @@ dev = [
   "pytest>=8.3,<9",
   "ruff>=0.9,<1",
   "setuptools>=75,<80",
+  "towncrier==25.8.0",
 ]
 
 [project.scripts]
@@ -65,3 +66,10 @@ include = [
 ]
 typeCheckingMode = "basic"
 reportMissingImports = false
+
+[tool.towncrier]
+directory = "changelog.d"
+filename = "CHANGELOG.md"
+package = "shiori"
+ignore = ["*.no-changelog.md"]
+title_format = "## {version} ({project_date})"

@@ -45,6 +45,10 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
 
+      - name: Check changelog fragment
+        if: github.event_name == 'pull_request'
+        run: uv run python tools/changelog_check.py --dir . --base "${{ github.event.pull_request.base.sha }}"
+
       - name: Verify lockfile and dependency vulnerabilities
         shell: bash
         run: |
