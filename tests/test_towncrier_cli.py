@@ -123,3 +123,21 @@ def test_towncrier_build_is_deterministic_with_keep(tmp_path: Path) -> None:
 
     assert (first / "changelog.d" / "42.feature.md").exists()
     assert (second / "changelog.d" / "42.feature.md").exists()
+
+
+def test_repository_draft_aggregates_own_fragment(tmp_path: Path) -> None:
+    """The repository's own public draft must render its changelog fragment."""
+    result = subprocess.run(
+        [sys.executable, "-m", "towncrier", "build", "--draft", "--config", str(PYPROJECT), "--dir", str(REPO)],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    literal = (
+        "Add versioned changelog history, deterministic Towncrier aggregation, "
+        "and fail-closed fragment enforcement."
+    )
+    assert result.stdout.count("### Features") == 1, result.stdout
+    assert result.stdout.count(literal) == 1, result.stdout
+    assert result.stdout.count("(#42)") == 1, result.stdout
