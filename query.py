@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from numbers import Real
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar, overload
 
 import numpy as np
 import psycopg2
@@ -1296,6 +1296,28 @@ def search(query, limit=DEFAULT_LIMIT, offset=0, *, filters: SearchFilters | Non
     return explained
 
 
+@overload
+def search_page(
+    query_text: str,
+    *,
+    limit: int = ...,
+    offset: int = ...,
+    filters: SearchFilters | None = ...,
+    explain: Literal[False] = ...,
+) -> SearchPage[tuple[Any, ...]]: ...
+
+
+@overload
+def search_page(
+    query_text: str,
+    *,
+    limit: int = ...,
+    offset: int = ...,
+    filters: SearchFilters | None = ...,
+    explain: Literal[True],
+) -> SearchPage[dict[str, Any]]: ...
+
+
 def search_page(
     query_text: str,
     *,
@@ -1303,7 +1325,7 @@ def search_page(
     offset: int = 0,
     filters: SearchFilters | None = None,
     explain: bool = False,
-) -> SearchPage[Any]:
+) -> SearchPage[tuple[Any, ...]] | SearchPage[dict[str, Any]]:
     """Return a bounded, stable page without exposing an unbounded count query.
 
     ``explain=False`` keeps the exact legacy call shape to ``search`` and
