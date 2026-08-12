@@ -9,6 +9,7 @@ nav:
       - Getting started: getting-started.md
       - Configuration: CONFIGURATION.md
       - Privacy: privacy-policy.md
+  - Contributing: contributing.md
   - Reference:
       - Design: DESIGN.md
       - Atomic rebuild ADR: adr/0001-atomic-rebuild-on-partial-embed-failure.md
