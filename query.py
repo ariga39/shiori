@@ -8,14 +8,14 @@ Usage: python3 query.py "search query" [--limit N] [--offset N]
 
 import argparse
 import re
+import sys
 import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from numbers import Real
-from typing import Any, Generic, Literal, TypeVar, overload
-import sys
+from typing import Any, Generic, Literal, TypeVar, cast, overload
 
 import numpy as np
 import psycopg2
@@ -1471,16 +1471,16 @@ def main(argv=None):
             summary = getattr(results, "explain_summary", None)
             if summary is not None:
                 chans = summary["channels"]
-                d = chans["dense"]
-                l = chans["lexical"]
-                e = chans["exact"]
+                dense = chans["dense"]
+                lexical = chans["lexical"]
+                exact = chans["exact"]
                 def _ch(c):
                     return f"executed:{str(c['executed']).lower()},fetched:{c['fetched_count']},at_limit:{str(c['at_pool_limit']).lower()}"
                 print(
                     f"Explain summary: pool_limit={summary['candidate_pool_limit']}; "
-                    f"dense={_ch(d)}; "
-                    f"lexical={_ch(l)},method:{l['method']}; "
-                    f"exact={_ch(e)}; "
+                    f"dense={_ch(dense)}; "
+                    f"lexical={_ch(lexical)},method:{lexical['method']}; "
+                    f"exact={_ch(exact)}; "
                     f"fused={summary['fused_candidate_count']}; "
                     f"selected={summary['selected_candidate_count']}; "
                     f"returned={summary['returned_count']}",
@@ -1490,11 +1490,12 @@ def main(argv=None):
 
     for i, row in enumerate(results, 1):
         if args.explain:
-            content = row["content"]
-            score = row["score"]
-            ts = row["timestamp"]
-            session_id = row["session_id"]
-            source_type = row["source_type"]
+            explain_row = cast(dict[str, Any], row)
+            content = explain_row["content"]
+            score = explain_row["score"]
+            ts = explain_row["timestamp"]
+            session_id = explain_row["session_id"]
+            source_type = explain_row["source_type"]
         else:
             content, score, ts, session_id, source_type = row[:5]
         print(f"--- Result {i} (score: {score:.6f}, time: {ts}, type: {source_type}) ---")
@@ -1503,7 +1504,7 @@ def main(argv=None):
             preview += "..."
         print(preview)
         if args.explain:
-            ex = row["explain"]
+            ex = cast(dict[str, Any], row)["explain"]
             chans = ex["channels"]
             parts = [
                 f"{name}#{chans[name]['candidate_rank'] if chans[name]['matched'] else '-'}"

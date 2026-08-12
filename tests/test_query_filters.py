@@ -862,9 +862,9 @@ def test_query_main_explain_prints_temporal_adjustment(monkeypatch, capsys):
 
     ``query.main --explain`` must render the frozen explain line's
     ``adjustments`` segment from the explain dict: when the dict reports
-    ``adjustments == ["temporal_decay"]``, the printed line must contain
-    ``adjustments=temporal_decay``, with all other fields/positions unchanged
-    and stderr empty.  The expected text is a human literal.
+    ``adjustments == ["temporal_decay"]``, the stderr Explain line must contain
+    ``adjustments=temporal_decay``, with all other fields/positions unchanged;
+    stdout stays the default result text and is not affected.
 
     On the current head this node fails ONLY because the CLI formatter
     hard-codes ``adjustments=none`` regardless of the dict value.
@@ -916,9 +916,10 @@ def test_query_main_explain_prints_unmatched_channels(monkeypatch, capsys):
     """Phase 4F1 slice9 genuine red (task #39).
 
     ``query.main --explain`` must render unmatched channels (matched=False,
-    candidate_rank=None) as ``#-`` in the frozen Explain line, with the rest of
-    the line/header/content/blank-line positions strictly unchanged and stderr
-    empty.  The expected stdout is a complete human literal.
+    candidate_rank=None) as ``#-`` in the frozen Explain line written to
+    stderr, with the rest of the line/header/content/blank-line positions
+    strictly unchanged; stdout stays the default result text.  The expected
+    stderr is a complete human literal.
 
     On the current head this node fails ONLY because the formatter prints the
     raw None for unmatched candidate_rank (``lexical#None,exact#None``).

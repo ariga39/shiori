@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, ContentBlock
@@ -101,9 +101,15 @@ def run_search(query_text, limit=DEFAULT_LIMIT, offset=0, *, source_types=None, 
             else:
                 page = query.search_page(query_text, limit=clamped, offset=offset, filters=filters)
         if explain:
-            results = [_serialize_explain_row(row) for row in page.results]
+            results = [
+                _serialize_explain_row(cast(dict[str, Any], row))
+                for row in page.results
+            ]
         else:
-            results = [_serialize_result(row) for row in page.results]
+            results = [
+                _serialize_result(cast(tuple[Any, ...], row))
+                for row in page.results
+            ]
     except Exception as exc:  # noqa: BLE001 - map failures to a safe public result
         return {"error": _public_error(exc)}
 
