@@ -857,3 +857,57 @@ def test_query_main_explain_output_and_default_unchanged(monkeypatch, capsys):
         "Explain: score=rrf; adjustments=none; channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true\n"
         "\n"
     )
+
+
+def test_query_main_explain_prints_temporal_adjustment(monkeypatch, capsys):
+    """Phase 4F1 slice8 genuine red (task #39).
+
+    ``query.main --explain`` must render the frozen explain line's
+    ``adjustments`` segment from the explain dict: when the dict reports
+    ``adjustments == ["temporal_decay"]``, the printed line must contain
+    ``adjustments=temporal_decay``, with all other fields/positions unchanged
+    and stderr empty.  The expected text is a human literal.
+
+    On the current head this node fails ONLY because the CLI formatter
+    hard-codes ``adjustments=none`` regardless of the dict value.
+    """
+    import query as query_mod
+
+    row_ts = T0
+
+    def fake_search(text, limit=5, offset=0, filters=None, explain=False):
+        if explain:
+            return [{
+                "content": "alpha beta",
+                "score": 0.9,
+                "timestamp": row_ts,
+                "session_id": "s1",
+                "source_type": "main_user",
+                "embedding_model": "voyage-4-large",
+                "embedding_dimension": 1024,
+                "explain": {
+                    "score_kind": "rrf",
+                    "adjustments": ["temporal_decay"],
+                    "channels": {
+                        "dense": {"matched": True, "candidate_rank": 1},
+                        "lexical": {"matched": True, "candidate_rank": 1},
+                        "exact": {"matched": True, "candidate_rank": 1},
+                    },
+                    "matched_channel_count": 3,
+                    "multi_channel": True,
+                },
+            }]
+        return [("alpha beta", 0.9, row_ts, "s1", "main_user", "voyage-4-large", 1024)]
+
+    monkeypatch.setattr(query_mod, "load_config", lambda **kw: _settings_stub())
+    monkeypatch.setattr(query_mod, "apply_settings", lambda settings: None)
+    monkeypatch.setattr(query_mod, "search", fake_search)
+
+    query_mod.main(["hello", "--explain"])
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert (
+        "Explain: score=rrf; adjustments=temporal_decay; "
+        "channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true\n"
+        in out
+    )
