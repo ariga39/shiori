@@ -119,3 +119,42 @@ def test_docs_contributing_covers_local_development_workflow(tmp_path: Path) -> 
         "uv run mkdocs serve",
     ):
         assert command in guide
+
+
+def test_docs_cli_mcp_reference_matches_public_surfaces(tmp_path: Path) -> None:
+    """The CLI/MCP reference must distinguish their real pagination surfaces."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mkdocs", "build", "--strict", "--site-dir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    homepage = (site_dir / "index.html").read_text(encoding="utf-8")
+    assert 'href="cli-mcp-reference/"' in homepage
+
+    reference = (site_dir / "cli-mcp-reference" / "index.html").read_text(encoding="utf-8")
+    for heading, title in (
+        ("cli-commands", "CLI commands"),
+        ("query-options", "Query options"),
+        ("mcp-search", "MCP search"),
+        ("limits-and-errors", "Limits and errors"),
+    ):
+        assert f'id="{heading}">{title}</h2>' in reference
+    for literal in (
+        "shiori ingest --source sessions",
+        "shiori query",
+        "--limit",
+        "--explain",
+        "shiori serve",
+        "search",
+        "offset",
+        "has_more",
+        "next_offset",
+    ):
+        assert literal in reference
+    assert "--offset" not in reference
