@@ -180,6 +180,7 @@ async def _search_tool(
     session_ids: list[str] | None = None,
     time_from: str | None = None,
     time_to: str | None = None,
+    explain: bool = False,
 ) -> dict:
     return run_search(
         query,
@@ -189,6 +190,7 @@ async def _search_tool(
         session_ids=session_ids,
         time_from=time_from,
         time_to=time_to,
+        explain=explain,
     )
 
 
