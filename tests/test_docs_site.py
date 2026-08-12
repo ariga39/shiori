@@ -57,3 +57,32 @@ def test_docs_site_navigation_exposes_existing_markdown(tmp_path: Path) -> None:
     positions = [homepage.find(href) for href in expected_hrefs]
     assert all(position >= 0 for position in positions), positions
     assert positions == sorted(positions), positions
+
+
+def test_docs_getting_started_covers_supported_lifecycle(tmp_path: Path) -> None:
+    """The public guide must cover the supported install-to-serve lifecycle."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mkdocs", "build", "--strict", "--site-dir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    homepage = (site_dir / "index.html").read_text(encoding="utf-8")
+    assert 'href="getting-started/"' in homepage
+
+    guide = (site_dir / "getting-started" / "index.html").read_text(encoding="utf-8")
+    for heading in ("install", "configure", "migrate", "ingest", "query", "serve"):
+        assert f'id="{heading}">{heading.title()}</h2>' in guide
+    for command in (
+        "uv sync --locked --extra dev",
+        "shiori db migrate",
+        "shiori ingest --source sessions",
+        "shiori query",
+        "shiori serve",
+    ):
+        assert command in guide
