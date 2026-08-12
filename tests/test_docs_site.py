@@ -242,3 +242,27 @@ requires-python = ">=3.11"
     assert second.stderr == ""
     assert (tmp_path / "llms.txt").read_bytes() == expected
     assert (tmp_path / "docs" / "llms.txt").read_bytes() == expected
+
+
+def test_docs_check_builds_site_and_llms_index(tmp_path: Path) -> None:
+    """The public docs check must validate and build both human and LLM docs."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "docs_check.py"),
+            "--site-dir",
+            str(site_dir),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "docs-check: ok\n"
+    assert result.stderr == ""
+    assert "Shiori" in (site_dir / "index.html").read_text(encoding="utf-8")
+    assert (site_dir / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
