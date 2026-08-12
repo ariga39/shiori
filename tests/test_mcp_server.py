@@ -138,13 +138,13 @@ def _mcp_dict_row(i=1):
     return {
         "content": f"content-{i}",
         "score": 0.9,
-        "timestamp": "2026-01-01T00:00:00+00:00",
+        "timestamp": f"2026-01-{i:02d}T00:00:00+00:00",
         "session_id": f"session-{i}",
         "source_type": "main_user",
         "embedding_model": "voyage-4-large",
         "embedding_dimension": 1024,
         "provenance": {
-            "timestamp": "2026-01-01T00:00:00+00:00",
+            "timestamp": f"2026-01-{i:02d}T00:00:00+00:00",
             "session_id": f"session-{i}",
             "source_type": "main_user",
             "embedding_model": "voyage-4-large",
@@ -217,12 +217,12 @@ def test_run_search_explain_preserves_default_and_contract(monkeypatch):
 
     assert len(true_explicit["results"]) == len(omitted["results"])
     for row, ref in zip(true_explicit["results"], omitted["results"]):
-        assert row["content"] == ref["content"]
-        assert row["score"] == ref["score"]
-        # Existing top-level fields and provenance unchanged.
-        for key in ("timestamp", "session_id", "source_type",
-                    "embedding_model", "embedding_dimension", "provenance"):
-            assert row[key] == ref[key]
-        # Frozen explain added, with no provenance inside it.
+        # "Only explain added": dropping explain yields the default ref row
+        # with identical key/value/iteration order.
+        row_without_explain = {k: v for k, v in row.items() if k != "explain"}
+        assert row_without_explain == ref
+        assert list(row_without_explain) == list(ref)
+        assert list(row) == [*list(ref), "explain"]
+        # Frozen explain literal, with no provenance inside it.
         assert row["explain"] == _mcp_dict_row()["explain"]
         assert "provenance" not in row["explain"]
