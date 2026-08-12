@@ -1429,7 +1429,7 @@ def main(argv=None):
             ex = row["explain"]
             chans = ex["channels"]
             parts = [
-                f"{name}#{chans[name]['candidate_rank']}"
+                f"{name}#{chans[name]['candidate_rank'] if chans[name]['matched'] else '-'}"
                 for name in ("dense", "lexical", "exact")
             ]
             adjustments = ex["adjustments"]
