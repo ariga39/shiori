@@ -39,7 +39,7 @@ The MCP server exposes one tool named `search`. Its input includes the query,
 `limit`, bare `offset`, the same structured filters, and optional `explain`.
 The response includes `results`, `count`, `limit`, `offset`, `has_more`, and
 `next_offset`. When explanation is enabled it also includes the additive
-explanation fields documented in the [design](DESIGN.md#571-explainable-retrieval-phase-4f1-task-39).
+explanation fields documented in the [design](DESIGN.md).
 
 The MCP surface is read-only: it cannot ingest, migrate, delete, export, or
 modify source data.
