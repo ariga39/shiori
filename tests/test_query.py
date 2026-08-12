@@ -411,3 +411,50 @@ def test_search_explain_multi_channel(db, mock_embed):
         "matched_channel_count": 3,
         "multi_channel": True,
     }
+
+
+def test_search_explain_reports_temporal_decay(db, mock_embed):
+    """Phase 4F1 slice7 genuine red (task #39).
+
+    Under an explicit time bound on the typed ``SearchFilters`` (Phase 4E2
+    intent) the existing unchanged decay formula applies, so ``explain=True``
+    must report ``adjustments == ["temporal_decay"]`` while the three channels
+    keep ``candidate_rank == 1`` and the default ``search()`` result
+    type/value/order is unchanged.
+
+    Single human-checkable doc, real isolated PostgreSQL, replay-free mock
+    embedding; no private intent/trace/helper used.
+
+    On the current head this node fails because the explain output hard-codes
+    ``adjustments == []`` instead of the temporal decay adjustment.
+    """
+    conn, prefix = db
+    sid = prefix + "-temporal-explain"
+    now = datetime.now(UTC)
+    _insert(conn, sid, "snowflake report is an explicit token test", QUERY_EMB, now)
+    filters = SearchFilters.from_inputs(
+        session_ids=[sid],
+        time_from=now - timedelta(days=60),
+    )
+
+    default_before = query.search("snowflake report", limit=20, filters=filters)
+    explained = query.search("snowflake report", limit=20, filters=filters, explain=True)
+    default_after = query.search("snowflake report", limit=20, filters=filters)
+
+    assert isinstance(default_after, list) and all(isinstance(r, tuple) for r in default_after)
+    assert [r[0] for r in default_after] == [r[0] for r in default_before]
+    assert [r[3] for r in default_after] == [r[3] for r in default_before]
+    assert default_after, "explicit time bound must still return the doc"
+
+    assert explained[0]["content"] == "snowflake report is an explicit token test"
+    assert explained[0]["explain"] == {
+        "score_kind": "rrf",
+        "adjustments": ["temporal_decay"],
+        "channels": {
+            "dense": {"matched": True, "candidate_rank": 1},
+            "lexical": {"matched": True, "candidate_rank": 1},
+            "exact": {"matched": True, "candidate_rank": 1},
+        },
+        "matched_channel_count": 3,
+        "multi_channel": True,
+    }
