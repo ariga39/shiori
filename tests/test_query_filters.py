@@ -743,6 +743,50 @@ def test_build_server_search_tool_invalid_filter_returns_stable_code(monkeypatch
     assert result == {"error": {"code": "invalid_time_format"}}
 
 
+def test_shiori_cli_query_forwards_explain_flag(monkeypatch):
+    """Phase 4F1 slice6 genuine red (task #39).
+
+    ``shiori.cli.main(["query", ...])`` must accept ``--explain`` on the
+    installed CLI parser (not just private ``_run_query``) and forward it to
+    ``query.main``.  Without the flag the forwarded argv is identical to the
+    current shape (query + --limit 5, no explain); with ``--explain`` the same
+    argv gains exactly ``--explain`` appended at the end, other values/order
+    unchanged.
+
+    ``shiori.cli.main`` is the public seam; ``_load``/settings and public
+    ``query.main`` are stubbed to capture the final argv.
+
+    On the current head this node fails ONLY because the installed parser does
+    not know ``--explain``.
+    """
+    import query as query_mod
+    import shiori.cli as cli_mod
+
+    captured = {}
+
+    def fake_query_main(argv):
+        captured["argv"] = argv
+
+    def fake_load(args):
+        return _settings_stub()
+
+    monkeypatch.setattr(cli_mod, "_load", fake_load)
+    monkeypatch.setattr(cli_mod, "_require_runtime", lambda settings: None)
+    monkeypatch.setattr(query_mod, "apply_settings", lambda settings: None)
+    monkeypatch.setattr(query_mod, "main", fake_query_main)
+
+    rc = cli_mod.main(["query", "hello", "--limit", "5"])
+    assert rc == 0
+    omitted = captured["argv"]
+    assert omitted == ["hello", "--limit", "5"]
+    assert "--explain" not in omitted
+
+    rc2 = cli_mod.main(["query", "hello", "--limit", "5", "--explain"])
+    assert rc2 == 0
+    explained = captured["argv"]
+    assert explained == ["hello", "--limit", "5", "--explain"]
+
+
 def test_query_main_explain_output_and_default_unchanged(monkeypatch, capsys):
     """Phase 4F1 slice5 genuine red (task #39).
 
