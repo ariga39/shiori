@@ -104,3 +104,57 @@ def test_changelog_check_accepts_single_ordinary_fragment(tmp_path: Path) -> Non
     assert draft.returncode == 0, draft.stderr
     assert draft.stdout.count("Features") == 1, draft.stdout
     assert draft.stdout.count(FRAGMENT_CONTENT) == 1, draft.stdout
+
+
+def test_changelog_check_accepts_multiple_ordinary_fragments(tmp_path: Path) -> None:
+    _run_git(tmp_path, "init", "--initial-branch=main")
+    _run_git(tmp_path, "config", "user.email", "tsumugi@example.invalid")
+    _run_git(tmp_path, "config", "user.name", "tsumugi")
+    pyproject_copy = tmp_path / "pyproject.toml"
+    pyproject_copy.write_text(PYPROJECT.read_text(encoding="utf-8"), encoding="utf-8")
+    changelog_dir = tmp_path / "changelog.d"
+    changelog_dir.mkdir()
+    _run_git(tmp_path, "add", "pyproject.toml", "changelog.d")
+    _run_git(tmp_path, "commit", "-m", "baseline")
+    base_sha = subprocess.check_output(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
+    ).strip()
+
+    feature = "First feature delivered to users."
+    bugfix = "A bugfix for a user-visible failure."
+    (changelog_dir / "42.feature.md").write_text(feature + "\n", encoding="utf-8")
+    (changelog_dir / "43.bugfix.md").write_text(bugfix + "\n", encoding="utf-8")
+    _run_git(tmp_path, "add", "changelog.d")
+    _run_git(tmp_path, "commit", "-m", "add fragments")
+
+    result = subprocess.run(
+        [sys.executable, str(CHECKER), "--dir", str(tmp_path), "--base", base_sha],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "changelog-check: 2 fragments accepted\n"
+    assert result.stderr == ""
+
+    draft = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "towncrier",
+            "build",
+            "--draft",
+            "--config",
+            str(tmp_path / "pyproject.toml"),
+            "--dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert draft.returncode == 0, draft.stderr
+    assert draft.stdout.count("Features") == 1, draft.stdout
+    assert draft.stdout.count("Bugfixes") == 1, draft.stdout
+    assert draft.stdout.count(feature) == 1, draft.stdout
+    assert draft.stdout.count(bugfix) == 1, draft.stdout
