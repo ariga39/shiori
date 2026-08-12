@@ -86,3 +86,32 @@ def test_docs_getting_started_covers_supported_lifecycle(tmp_path: Path) -> None
         "shiori serve",
     ):
         assert command in guide
+
+
+def test_docs_contributing_covers_local_development_workflow(tmp_path: Path) -> None:
+    """The contributor guide must document the supported local workflow."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mkdocs", "build", "--strict", "--site-dir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    homepage = (site_dir / "index.html").read_text(encoding="utf-8")
+    assert 'href="contributing/"' in homepage
+
+    guide = (site_dir / "contributing" / "index.html").read_text(encoding="utf-8")
+    for heading in ("development-setup", "tests", "documentation", "pull-requests"):
+        title = heading.replace("-", " ").title()
+        assert f'id="{heading}">{title}</h2>' in guide
+    for command in (
+        "uv sync --locked --extra dev",
+        "uv run pytest -q",
+        "uv run mkdocs build --strict",
+        "uv run mkdocs serve",
+    ):
+        assert command in guide
