@@ -105,8 +105,12 @@ def test_docs_contributing_covers_local_development_workflow(tmp_path: Path) -> 
     assert 'href="contributing/"' in homepage
 
     guide = (site_dir / "contributing" / "index.html").read_text(encoding="utf-8")
-    for heading in ("development-setup", "tests", "documentation", "pull-requests"):
-        title = heading.replace("-", " ").title()
+    for heading, title in (
+        ("development-setup", "Development setup"),
+        ("tests", "Tests"),
+        ("documentation", "Documentation"),
+        ("pull-requests", "Pull requests"),
+    ):
         assert f'id="{heading}">{title}</h2>' in guide
     for command in (
         "uv sync --locked --extra dev",
