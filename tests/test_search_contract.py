@@ -307,16 +307,19 @@ def test_search_page_explain_keeps_default_and_pagination(monkeypatch):
 
     The seam is the public ``query.search_page``; ``query.search`` is stubbed
     to observe whether ``explain`` is forwarded and to return
-    ``offset+limit+1`` slice1-shaped dict rows.  No private helper/trace/PG.
+    ``offset+limit+1`` rows (tuple when explain=False, slice1-shaped dict when
+    explain=True).  No private helper/trace/PG.
 
     On the current head this node fails ONLY because the public
     ``search_page`` does not accept the ``explain`` keyword argument.
     """
-    captured = {}
+    calls = []
 
     def fake_search(text, limit=5, *, explain=False):
-        captured["explain"] = explain
-        return [_explain_row(i) for i in range(1, limit + 1)]
+        calls.append(explain)
+        if explain:
+            return [_explain_row(i) for i in range(1, limit + 1)]
+        return [_row(i) for i in range(1, limit + 1)]
 
     monkeypatch.setattr(query, "search", fake_search)
 
@@ -334,8 +337,8 @@ def test_search_page_explain_keeps_default_and_pagination(monkeypatch):
     assert explained.results[0]["content"] == "content-2"
     assert explained.results[0]["explain"] == _explain_row()["explain"]
 
-    # explain forwarded to the underlying public search.
-    assert captured["explain"] is True
+    # explain forwarded to the underlying public search (default, explain, default).
+    assert calls == [False, True, False]
 
     # Pagination identical and truthful (look-ahead still real).
     for field in ("limit", "offset", "has_more", "next_offset"):
