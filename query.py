@@ -1420,12 +1420,11 @@ def main(argv=None):
             ex = row["explain"]
             chans = ex["channels"]
             parts = [
-                f"{name}#{chans[name]['candidate_rank'] if chans[name]['matched'] else '-'}"
+                f"{name}#{chans[name]['candidate_rank']}"
                 for name in ("dense", "lexical", "exact")
             ]
-            adjustments = "; ".join(ex["adjustments"]) if ex["adjustments"] else "none"
             print(
-                f"Explain: score={ex['score_kind']}; adjustments={adjustments}; "
+                f"Explain: score={ex['score_kind']}; adjustments=none; "
                 f"channels={','.join(parts)}; matched_channels={ex['matched_channel_count']}; "
                 f"multi_channel={str(ex['multi_channel']).lower()}"
             )
