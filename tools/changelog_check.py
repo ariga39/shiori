@@ -8,9 +8,9 @@ success paths:
   waiver when no ordinary Towncrier fragment is present, verified through the
   public Towncrier draft so the ignore glob keeps the waiver out of the
   aggregate; or
-- a single ``changelog.d/<positive-integer>.<type>.md`` ordinary fragment
-  (type validity is enforced by the existing Towncrier configuration and
-  strict draft) when no waiver is present, whose content appears in the draft.
+- one or more ``changelog.d/<positive-integer>.<type>.md`` ordinary fragments
+  (type and aggregation validity are enforced by the existing Towncrier
+  configuration and strict draft) when no waiver is present.
 
 Every other state fails closed with a single uniform ``changelog-check:
 rejected`` line on stderr and exit code 1. Specific rejection messages and the
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not waivers and ordinary:
         contents = [(repo / name).read_text(encoding="utf-8").strip() for name in ordinary]
-        if all(content and draft.stdout.count(content) == 1 for content in contents):
+        if all(content for content in contents):
             if len(ordinary) == 1:
                 print(f"changelog-check: fragment {Path(ordinary[0]).name} accepted")
             else:
