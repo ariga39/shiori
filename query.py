@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from math import isfinite
 from numbers import Real
 from typing import Any, Generic, Literal, TypeVar, overload
+import sys
 
 import numpy as np
 import psycopg2
@@ -1466,6 +1467,25 @@ def main(argv=None):
 
     if not results:
         print("No results found.")
+        if args.explain:
+            summary = getattr(results, "explain_summary", None)
+            if summary is not None:
+                chans = summary["channels"]
+                d = chans["dense"]
+                l = chans["lexical"]
+                e = chans["exact"]
+                def _ch(c):
+                    return f"executed:{str(c['executed']).lower()},fetched:{c['fetched_count']},at_limit:{str(c['at_pool_limit']).lower()}"
+                print(
+                    f"Explain summary: pool_limit={summary['candidate_pool_limit']}; "
+                    f"dense={_ch(d)}; "
+                    f"lexical={_ch(l)},method:{l['method']}; "
+                    f"exact={_ch(e)}; "
+                    f"fused={summary['fused_candidate_count']}; "
+                    f"selected={summary['selected_candidate_count']}; "
+                    f"returned={summary['returned_count']}",
+                    file=sys.stderr,
+                )
         return
 
     for i, row in enumerate(results, 1):
