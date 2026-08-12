@@ -158,3 +158,33 @@ def test_docs_cli_mcp_reference_matches_public_surfaces(tmp_path: Path) -> None:
     ):
         assert literal in reference
     assert "--offset" not in reference
+
+
+def test_llms_txt_matches_documentation_navigation() -> None:
+    """The public checker must verify deterministic LLM-readable documentation."""
+    result = subprocess.run(
+        [sys.executable, "tools/build_llms_txt.py", "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "llms.txt is up to date\n"
+
+    root_llms = (ROOT / "llms.txt").read_bytes()
+    docs_llms = (ROOT / "docs" / "llms.txt").read_bytes()
+    assert root_llms == docs_llms
+
+    rendered = root_llms.decode("utf-8")
+    assert "# Shiori" in rendered
+    assert "> Searchable long-term memory for AI agents." in rendered
+    expected_urls = [
+        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/getting-started.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/contributing.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/cli-mcp-reference.md",
+    ]
+    positions = [rendered.find(url) for url in expected_urls]
+    assert all(position >= 0 for position in positions), positions
+    assert positions == sorted(positions), positions
