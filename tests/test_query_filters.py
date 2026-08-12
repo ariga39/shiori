@@ -906,8 +906,9 @@ def test_query_main_explain_prints_temporal_adjustment(monkeypatch, capsys):
     query_mod.main(["hello", "--explain"])
     out, err = capsys.readouterr()
     assert err == ""
-    assert (
-        "Explain: score=rrf; adjustments=temporal_decay; "
-        "channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true\n"
-        in out
+    assert out == (
+        "--- Result 1 (score: 0.900000, time: 2026-08-01 00:00:00+00:00, type: main_user) ---\n"
+        "alpha beta\n"
+        "Explain: score=rrf; adjustments=temporal_decay; channels=dense#1,lexical#1,exact#1; matched_channels=3; multi_channel=true\n"
+        "\n"
     )
