@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -702,3 +704,39 @@ def test_starlight_llms_txt_is_bilingual_and_public(tmp_path: Path) -> None:
     positions = [rendered.find(url) for url in expected_urls]
     assert all(position >= 0 for position in positions), positions
     assert positions == sorted(positions), positions
+
+
+def test_llms_txt_rejects_navigation_without_chinese_group_translation(tmp_path: Path) -> None:
+    """The public checker must fail closed when a group lacks its zh-CN label."""
+    shutil.copytree(
+        ROOT / "src" / "content" / "docs",
+        tmp_path / "src" / "content" / "docs",
+    )
+    (tmp_path / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
+    nav = json.loads((ROOT / "docs-navigation.json").read_text(encoding="utf-8"))
+    (tmp_path / "docs-navigation.json").write_text(json.dumps(nav), encoding="utf-8")
+
+    write = subprocess.run(
+        [sys.executable, "tools/build_llms_txt.py", "--write", "--dir", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert write.returncode == 0, write.stderr
+
+    nav["sidebar"][0]["translations"] = {}
+    (tmp_path / "docs-navigation.json").write_text(json.dumps(nav), encoding="utf-8")
+
+    check = subprocess.run(
+        [sys.executable, "tools/build_llms_txt.py", "--check", "--dir", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert check.returncode == 1
+    assert check.stdout == ""
+    assert check.stderr == "llms.txt is out of date\n"
