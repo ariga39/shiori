@@ -100,7 +100,7 @@ def test_manifest_contains_runtime_release_references() -> None:
     assert "include tools/db_count.py" in manifest
     assert "recursive-include tools/e2e-replay-sessions *.jsonl" in manifest
     assert "recursive-include tests/fixtures/replay *.jsonl *.json" in manifest
-    assert "recursive-include docs *.md" in manifest
+    assert "recursive-include src/content/docs *.md" in manifest
     assert "include THIRD_PARTY_NOTICES.md" in manifest
 
 
