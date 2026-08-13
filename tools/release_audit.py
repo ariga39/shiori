@@ -10,6 +10,7 @@ paths, which keeps failure evidence safe to attach to CI.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -33,6 +34,17 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 REQUIRED_IGNORE_MARKERS = (".env", "*.key", "*credentials*", ".data/", "dist/", "build/", "*.log")
 
+# Pinned Starlight/Pagefind vendor attribution bundles. These built UI assets
+# embed third-party theme-maintainer email addresses as attribution data. The
+# mapping keys are artifact-dir relative POSIX paths and the values are the
+# exact SHA-256 digests of the pinned content, so a bundle is exempt only while
+# its bytes are unchanged; any content or version drift re-blocks the file.
+PINNED_STARLIGHT_VENDOR_BUNDLES: dict[str, str] = {
+    "_astro/ui-core.BzPh4z-r.js": "3bc8f8d4bb177b36136522497c555b6603b7f2bc0ccbef8784d7c32833c1d454",
+    "pagefind/pagefind-ui.js": "2efa93f2e80a199ca742a69bd4cfffabc5c591ebe7763f64f7c655fd00d2209f",
+    "pagefind/pagefind-component-ui.js": "958620129dd14bd851805daeb12ce708bd63b9287325d1d5ae6f73a04d1723f8",
+}
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -52,7 +64,9 @@ def _git(root: Path, *args: str) -> str:
     return result.stdout
 
 
-def _is_documented_example(category: str, match: str, *, source: str, path: str) -> bool:
+def _is_documented_example(
+    category: str, match: str, *, source: str, path: str, digest: str | None = None
+) -> bool:
     """Recognize only fixed, non-secret examples already used by the docs/tests."""
     # These two files contain the audit's own executable detection fixtures and
     # regex literals. They are not release inputs; the tests separately prove
@@ -69,6 +83,14 @@ def _is_documented_example(category: str, match: str, *, source: str, path: str)
     ):
         return True
     if category == "email_in_blob":
+        # Hash-pinned third-party attribution emails in unchanged artifact
+        # bundles are documented vendor data. No directory/glob allowance: an
+        # exact relative path plus an exact content digest is required, and
+        # only the email category is exempted for these files.
+        if source == "artifact" and digest is not None:
+            pinned_digest = PINNED_STARLIGHT_VENDOR_BUNDLES.get(path)
+            if pinned_digest is not None and digest == pinned_digest:
+                return True
         domain = match.rsplit("@", 1)[-1].lower()
         return domain.endswith((".example", ".invalid", ".test")) or source == "commit_metadata"
     if category == "provider_live_key":
@@ -93,7 +115,9 @@ def _is_documented_example(category: str, match: str, *, source: str, path: str)
     return False
 
 
-def _scan_text(text: str, *, object_prefix: str, source: str, path: str = "") -> list[Finding]:
+def _scan_text(
+    text: str, *, object_prefix: str, source: str, path: str = "", digest: str | None = None
+) -> list[Finding]:
     findings: list[Finding] = []
     for category, pattern in PATTERNS:
         match = pattern.search(text)
@@ -103,7 +127,9 @@ def _scan_text(text: str, *, object_prefix: str, source: str, path: str = "") ->
                     category=category,
                     object_prefix=object_prefix[:12],
                     source=source,
-                    blocking=not _is_documented_example(category, match.group(0), source=source, path=path),
+                    blocking=not _is_documented_example(
+                        category, match.group(0), source=source, path=path, digest=digest
+                    ),
                 )
             )
     return findings
@@ -180,7 +206,14 @@ def audit(root: Path, *, artifact_dir: Path | None = None) -> dict[str, object]:
             for path in sorted(p for p in artifact_dir.rglob("*") if p.is_file()):
                 artifact_files += 1
                 data = path.read_bytes()
-                findings.extend(_scan_text(data.decode("utf-8", errors="replace"), object_prefix="artifact", source="artifact", path=str(path.relative_to(artifact_dir))))
+                digest = hashlib.sha256(data).hexdigest()
+                findings.extend(_scan_text(
+                    data.decode("utf-8", errors="replace"),
+                    object_prefix="artifact",
+                    source="artifact",
+                    path=str(path.relative_to(artifact_dir)),
+                    digest=digest,
+                ))
 
     counts: dict[str, int] = {}
     blocking_counts: dict[str, int] = {}
