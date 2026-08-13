@@ -18,6 +18,7 @@
         "DESIGN",
         "contributing",
         "adr/0001-atomic-rebuild-on-partial-embed-failure",
+        "deployment/cloudflare-workers",
         "RELEASE_CHECKLIST"
       ]
     }
