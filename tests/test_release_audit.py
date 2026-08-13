@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -108,3 +109,45 @@ def test_audit_covers_all_refs_and_commit_metadata(tmp_path: Path) -> None:
     assert result["reachable_refs"] >= 3
     assert result["reachable_commits"] >= 2
     assert any(item["source"] == "commit_metadata" for item in result["findings"])
+
+
+def test_release_audit_accepts_only_unchanged_pinned_starlight_vendor_attribution(tmp_path: Path) -> None:
+    """The audit must hash-pin vendor attribution emails, not path-allow them."""
+    artifact = tmp_path / "artifact"
+
+    build = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(artifact)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert build.returncode == 0, build.stderr
+
+    def audit() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(AUDIT_PATH), "--root", str(ROOT), "--artifact-dir", str(artifact)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    first = audit()
+    assert first.returncode == 0, first.stdout
+    payload = json.loads(first.stdout)
+    assert payload["ok"] is True
+    assert "email_in_blob" not in payload["blocking_finding_counts"]
+
+    vendor = artifact / "pagefind" / "pagefind-ui.js"
+    fixture_domain = "corp." + "example.com"
+    fixture_email = f"release-owner@{fixture_domain}"
+    vendor.write_text(
+        vendor.read_text(encoding="utf-8") + f"\n{fixture_email}\n",
+        encoding="utf-8",
+    )
+
+    second = audit()
+    assert second.returncode == 1, second.stdout
+    payload = json.loads(second.stdout)
+    assert payload["ok"] is False
+    assert payload["blocking_finding_counts"].get("email_in_blob") == 1
