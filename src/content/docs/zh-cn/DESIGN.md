@@ -29,7 +29,7 @@ MCP 表面严格只读：它不能摄取、迁移、删除、导出或修改源�
 
 ### 2.3 `session_facts` —— legacy 状态
 
-部分 live 数据库存在 `session_facts` 表（含 HNSW 嵌入索引与 category/time/trigram 索引），但当前源码树没有任何代码读写它。这里仅作为历史结构事实记录，不是活跃能力。
+部分 live 数据库存在 `session_facts` 表（含 HNSW 嵌入索引与 category/time/trigram 索引）。摄取与检索管线不使用它，但隐私生命周期操作仍会统计、导出和删除 legacy 行。这里将其记录为 legacy 结构事实，不是活跃的摄取或检索能力。
 
 ## 3. 摄取管线
 

@@ -29,7 +29,7 @@ Records each processed file (`file_path`, `file_mtime`, `file_size`, `processed_
 
 ### 2.3 `session_facts` — legacy status
 
-A `session_facts` table exists in some live databases (with an HNSW embedding index and category/time/trigram indexes), but the current source tree has no code that reads or writes it. It is recorded here as a historical structural fact, not an active capability.
+A `session_facts` table exists in some live databases (with an HNSW embedding index and category/time/trigram indexes). The ingestion and retrieval pipelines do not use it, while privacy lifecycle operations still count, export, and delete legacy rows. It is recorded here as a legacy structural fact, not an active ingestion or retrieval capability.
 
 ## 3. Ingestion pipeline
 
