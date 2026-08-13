@@ -563,3 +563,64 @@ def test_workers_dry_run_packages_bilingual_starlight_site(tmp_path: Path) -> No
     assert (ROOT / "dist" / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
     assert bundle_dir.is_dir()
     assert any(path.is_file() for path in bundle_dir.rglob("*"))
+
+
+def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path: Path) -> None:
+    """The public docs must document GitHub-linked Workers deployment bilingually."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "tools" / "docs_check.py"),
+            "--site-dir",
+            str(site_dir),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "docs-check: ok\n"
+    assert result.stderr == ""
+    english = (site_dir / "deployment" / "cloudflare-workers" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    chinese = (site_dir / "zh-cn" / "deployment" / "cloudflare-workers" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "Connect the repository in Cloudflare Workers Builds, then use the pinned "
+        "repository commands below." in english
+    )
+    assert "在 Cloudflare Workers Builds 中连接此仓库，然后使用下列仓库内固定版本命令。" not in english
+    assert "在 Cloudflare Workers Builds 中连接此仓库，然后使用下列仓库内固定版本命令。" in chinese
+    assert (
+        "Connect the repository in Cloudflare Workers Builds, then use the pinned "
+        "repository commands below." not in chinese
+    )
+    for page in (english, chinese):
+        assert "npm run docs:build" in page
+        assert "npm exec wrangler deploy -- --config wrangler.jsonc" in page
+    assert (
+        "Do not commit Cloudflare account IDs, Worker identifiers, routes, domains, or "
+        "API tokens to this repository." in english
+    )
+    assert "不要将 Cloudflare 账户 ID、Worker 标识符、路由、域名或 API 令牌提交到此仓库。" in chinese
+
+    homepage = (site_dir / "index.html").read_text(encoding="utf-8")
+    zh_homepage = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    assert 'href="/deployment/cloudflare-workers/"' in homepage
+    assert 'href="/zh-cn/deployment/cloudflare-workers/"' in zh_homepage
+
+    rendered = (ROOT / "llms.txt").read_text(encoding="utf-8")
+    assert (
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
+        "deployment/cloudflare-workers.md" in rendered
+    )
+    assert (
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
+        "zh-cn/deployment/cloudflare-workers.md" in rendered
+    )
