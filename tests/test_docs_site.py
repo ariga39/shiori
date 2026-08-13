@@ -371,3 +371,6 @@ def test_starlight_getting_started_is_bilingual(tmp_path: Path) -> None:
         "This guide follows Shiori's supported local lifecycle from a locked development "
         "install through its read-only MCP server." not in chinese
     )
+    for page in (english, chinese):
+        assert 'href="../CONFIGURATION/"' in page
+        assert 'href="../privacy-policy/"' in page
