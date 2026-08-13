@@ -673,3 +673,59 @@ def test_starlight_navigation_is_explicit_and_bilingual(tmp_path: Path) -> None:
     assert re.search(r'<option value="/zh-cn/"[^>]*>简体中文</option>', english)
     assert re.search(r'<option value="/"[^>]*>English</option>', chinese)
     assert re.search(r'<option value="/zh-cn/"[^>]*>简体中文</option>', chinese)
+
+
+def test_starlight_llms_txt_is_bilingual_and_public(tmp_path: Path) -> None:
+    """The public build must ship a bilingual llms.txt identical to the root copy."""
+    check = subprocess.run(
+        [sys.executable, "tools/build_llms_txt.py", "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert check.returncode == 0, check.stderr
+    assert check.stdout == "llms.txt is up to date\n"
+
+    site_dir = tmp_path / "site"
+    build = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert build.returncode == 0, build.stderr
+    root_llms = (ROOT / "llms.txt").read_bytes()
+    site_llms = (site_dir / "llms.txt").read_bytes()
+    assert root_llms == site_llms
+
+    rendered = root_llms.decode("utf-8")
+    assert "# Shiori" in rendered
+    assert "> Searchable long-term memory for AI agents." in rendered
+    assert "## English" in rendered
+    assert "## 简体中文" in rendered
+    assert "https://raw.githubusercontent.com/ariga39/shiori/main/docs/" not in rendered
+
+    base = "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
+    english_paths = [
+        "index.md",
+        "getting-started.md",
+        "CONFIGURATION.md",
+        "privacy-policy.md",
+        "cli-mcp-reference.md",
+        "DESIGN.md",
+        "contributing.md",
+        "adr/0001-atomic-rebuild-on-partial-embed-failure.md",
+        "RELEASE_CHECKLIST.md",
+    ]
+    expected_urls = [
+        base + path for path in english_paths
+    ] + [
+        base + f"zh-cn/{path}" for path in english_paths
+    ]
+    positions = [rendered.find(url) for url in expected_urls]
+    assert all(position >= 0 for position in positions), positions
+    assert positions == sorted(positions), positions
