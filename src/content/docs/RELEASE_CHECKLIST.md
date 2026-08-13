@@ -1,4 +1,8 @@
-# shiori v0.1.0 private release-candidate checklist
+---
+title: "shiori v0.1.0 private release-candidate checklist"
+description: This is a release-candidate checklist, not a release authorization.
+slug: RELEASE_CHECKLIST
+---
 
 This is a release-candidate checklist, not a release authorization. The
 repository remains private until the owner makes a separate visibility
@@ -12,15 +16,19 @@ checklist.
 - [ ] Confirm the candidate worktree is clean and the candidate is not based on
       a stale main branch.
 - [ ] Record hosted CI run IDs against that exact commit.
-- [ ] Record the independent clean-machine/security peer result against that
-      exact commit.
-- [ ] Record final owner acceptance and the actual protected merge SHA, if the
-      candidate is approved for merge.
+- [ ] Record the pair-programming review GO against that exact commit.
+- [ ] Record the actual protected merge SHA after exact-head gates and pair-programming review are green.
 
 ## Required engineering gates
 
 - [ ] `uv sync --locked --extra dev`, `uv lock --check`, Ruff, Pyright, and the
       full unit suite pass.
+- [ ] `npm ci` installs the pinned Node dependencies, and the public
+      `npm run docs:build -- --outDir <temp>` builds the documentation site
+      into an explicitly specified temporary directory.
+- [ ] The Towncrier changelog fragment is present and the documented checker and
+      draft commands pass for user-visible changes; internal or test-only
+      changes use the audited waiver path.
 - [ ] Hosted PostgreSQL/pgvector service passes client/server major parity,
       vector preload, isolated marker/identity checks, and `shiori db migrate`
       followed by `shiori db health`.
@@ -71,6 +79,11 @@ checklist.
   changes.
 - A production embedding service/key is required for real semantic ingest;
   deterministic vectors are only for isolated development/test smoke runs.
+- The project uses pair-programming review with an exact-head protected merge;
+  there is no separate independent-review step for every change, and the owner
+  does not approve each individual merge. Release, tag, package/image publish,
+  deploy, external registration, and visibility changes still require a
+  separate explicit owner authorization; this page does not grant it.
 - `schema.sql` is retained as a historical legacy fixture. It does not repair
   drift; only an exact canonical legacy structure can be adopted, and all
   other existing drift is an operator-visible fail-closed condition.

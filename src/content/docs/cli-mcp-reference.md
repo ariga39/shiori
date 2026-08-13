@@ -1,4 +1,7 @@
-# CLI and MCP reference
+---
+title: CLI and MCP reference
+description: Both use the same configured search service, but their pagination surfaces are intentionally different.
+---
 
 Shiori provides an installed command-line interface and a local, read-only MCP
 stdio server. Both use the same configured search service, but their pagination
@@ -39,7 +42,7 @@ The MCP server exposes one tool named `search`. Its input includes the query,
 `limit`, bare `offset`, the same structured filters, and optional `explain`.
 The response includes `results`, `count`, `limit`, `offset`, `has_more`, and
 `next_offset`. When explanation is enabled it also includes the additive
-explanation fields documented in the [design](DESIGN.md).
+explanation fields documented in the [design](../DESIGN/).
 
 The MCP surface is read-only: it cannot ingest, migrate, delete, export, or
 modify source data.

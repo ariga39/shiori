@@ -1,0 +1,14 @@
+{
+  "name": "shiori-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:build": "astro build",
+    "docs:workers:dry-run": "npm run docs:build && wrangler deploy --dry-run --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "@astrojs/starlight": "0.41.7",
+    "astro": "7.2.1",
+    "wrangler": "4.122.0"
+  }
+}
