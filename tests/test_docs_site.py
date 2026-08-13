@@ -374,3 +374,24 @@ def test_starlight_getting_started_is_bilingual(tmp_path: Path) -> None:
     for page in (english, chinese):
         assert 'href="../CONFIGURATION/"' in page
         assert 'href="../privacy-policy/"' in page
+
+
+def test_starlight_configuration_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual configuration page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "CONFIGURATION" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "CONFIGURATION" / "index.html").read_text(encoding="utf-8")
+    assert "This is the current runtime contract." in english
+    assert "这是当前的运行时契约。" not in english
+    assert "这是当前的运行时契约。" in chinese
+    assert "This is the current runtime contract." not in chinese
