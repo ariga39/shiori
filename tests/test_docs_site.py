@@ -516,3 +516,34 @@ def test_starlight_design_is_bilingual(tmp_path: Path) -> None:
         "The ingestion and retrieval pipelines do not use it, while privacy lifecycle "
         "operations still count, export, and delete legacy rows." not in chinese
     )
+
+
+def test_starlight_atomic_rebuild_adr_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual atomic-rebuild ADR page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "adr" / "0001-atomic-rebuild-on-partial-embed-failure" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    chinese = (site_dir / "zh-cn" / "adr" / "0001-atomic-rebuild-on-partial-embed-failure" / "index.html").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "Choose option 1: atomic full rebuild. Embeddings are prepared before deletion, "
+        "and delete plus insert remains transactional." in english
+    )
+    assert "选择方案 1：原子全量重建。嵌入在删除前准备完成，删除与插入保持事务原子性。" not in english
+    assert "选择方案 1：原子全量重建。嵌入在删除前准备完成，删除与插入保持事务原子性。" in chinese
+    assert (
+        "Choose option 1: atomic full rebuild. Embeddings are prepared before deletion, "
+        "and delete plus insert remains transactional." not in chinese
+    )
