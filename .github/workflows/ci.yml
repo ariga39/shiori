@@ -38,12 +38,20 @@ jobs:
         with:
           python-version: '3.12'
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '26.7.0'
+          cache: npm
+
       - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
         with:
           version: '0.12.3'
 
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
+
+      - name: Install locked documentation dependencies
+        run: npm ci
 
       - name: Check changelog fragment
         if: github.event_name == 'pull_request'
@@ -72,6 +80,9 @@ jobs:
 
       - name: Check documentation site and LLM index
         run: uv run python tools/docs_check.py --site-dir "${RUNNER_TEMP}/shiori-docs-site"
+
+      - name: Verify Cloudflare Workers Static Assets bundle
+        run: npm run docs:workers:dry-run -- --outdir "${RUNNER_TEMP}/shiori-workers-bundle"
 
       - name: Type-check installable package
         run: uv run pyright
