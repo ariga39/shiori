@@ -578,3 +578,32 @@ def test_starlight_release_checklist_is_bilingual(tmp_path: Path) -> None:
         "Record the actual protected merge SHA after exact-head gates and "
         "pair-programming review are green." not in chinese
     )
+
+
+def test_starlight_preserves_case_sensitive_stable_routes(tmp_path: Path) -> None:
+    """The public Starlight build must emit the frozen case-sensitive routes."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    generated = {
+        path.relative_to(site_dir).as_posix()
+        for path in site_dir.rglob("index.html")
+    }
+    expected = {
+        "CONFIGURATION/index.html",
+        "DESIGN/index.html",
+        "RELEASE_CHECKLIST/index.html",
+        "zh-cn/CONFIGURATION/index.html",
+        "zh-cn/DESIGN/index.html",
+        "zh-cn/RELEASE_CHECKLIST/index.html",
+    }
+    missing = sorted(expected - generated)
+    assert not missing, f"case-sensitive stable routes missing: {missing}"
