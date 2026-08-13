@@ -15,7 +15,7 @@ uv sync --locked --extra dev
 
 ## 配置
 
-按照[配置参考](../zh-cn/configuration-reference/)设置明确的数据库、数据源与嵌入提供方取值。在摄取归档之前，请阅读[隐私政策](../zh-cn/privacy-policy/)。Shiori 没有隐式的数据源、凭据或提供方路径。
+按照[配置参考](../CONFIGURATION/)设置明确的数据库、数据源与嵌入提供方取值。在摄取归档之前，请阅读[隐私政策](../privacy-policy/)。Shiori 没有隐式的数据源、凭据或提供方路径。
 
 ## 迁移
 

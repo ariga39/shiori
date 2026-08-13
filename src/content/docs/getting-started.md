@@ -17,7 +17,7 @@ uv sync --locked --extra dev
 ## Configure
 
 Set the explicit database, source, and embedding-provider values described in
-the [configuration reference](../configuration-reference/). Review the
+the [configuration reference](../CONFIGURATION/). Review the
 [privacy policy](../privacy-policy/) before ingesting an archive. Shiori has no
 implicit source, credential, or provider paths.
 
