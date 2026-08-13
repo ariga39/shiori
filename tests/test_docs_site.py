@@ -395,3 +395,30 @@ def test_starlight_configuration_is_bilingual(tmp_path: Path) -> None:
     assert "这是当前的运行时契约。" not in english
     assert "这是当前的运行时契约。" in chinese
     assert "This is the current runtime contract." not in chinese
+
+
+def test_starlight_privacy_policy_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual privacy policy page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "privacy-policy" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "privacy-policy" / "index.html").read_text(encoding="utf-8")
+    assert (
+        "This document states the local data-minimization and lifecycle contract that "
+        "the ingestion and privacy seams enforce." in english
+    )
+    assert "本文说明摄取与隐私边界所执行的本地数据最小化与生命周期契约。" not in english
+    assert "本文说明摄取与隐私边界所执行的本地数据最小化与生命周期契约。" in chinese
+    assert (
+        "This document states the local data-minimization and lifecycle contract that "
+        "the ingestion and privacy seams enforce." not in chinese
+    )
