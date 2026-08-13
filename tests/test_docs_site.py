@@ -344,3 +344,30 @@ def test_starlight_site_builds_bilingual_homepages(tmp_path: Path) -> None:
     assert "面向 AI 智能体的可搜索长期记忆。" not in english
     assert "面向 AI 智能体的可搜索长期记忆。" in chinese
     assert "Searchable long-term memory for AI agents." not in chinese
+
+
+def test_starlight_getting_started_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual getting-started page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "getting-started" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "getting-started" / "index.html").read_text(encoding="utf-8")
+    assert (
+        "This guide follows Shiori's supported local lifecycle from a locked development "
+        "install through its read-only MCP server." in english
+    )
+    assert "本指南涵盖 Shiori 从锁定的开发环境安装到只读 MCP 服务器的受支持本地生命周期。" not in english
+    assert "本指南涵盖 Shiori 从锁定的开发环境安装到只读 MCP 服务器的受支持本地生命周期。" in chinese
+    assert (
+        "This guide follows Shiori's supported local lifecycle from a locked development "
+        "install through its read-only MCP server." not in chinese
+    )
