@@ -422,3 +422,30 @@ def test_starlight_privacy_policy_is_bilingual(tmp_path: Path) -> None:
         "This document states the local data-minimization and lifecycle contract that "
         "the ingestion and privacy seams enforce." not in chinese
     )
+
+
+def test_starlight_contributing_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual contributing page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "contributing" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "contributing" / "index.html").read_text(encoding="utf-8")
+    assert (
+        "Keep changes narrowly scoped, test them through public behavior, and report "
+        "what was and was not verified." in english
+    )
+    assert "保持变更范围精简，通过公开行为进行测试，并报告哪些内容已验证、哪些尚未验证。" not in english
+    assert "保持变更范围精简，通过公开行为进行测试，并报告哪些内容已验证、哪些尚未验证。" in chinese
+    assert (
+        "Keep changes narrowly scoped, test them through public behavior, and report "
+        "what was and was not verified." not in chinese
+    )
