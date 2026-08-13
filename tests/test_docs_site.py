@@ -568,3 +568,13 @@ def test_starlight_release_checklist_is_bilingual(tmp_path: Path) -> None:
     assert "这是一份候选发布检查清单，不是发布授权。" not in english
     assert "这是一份候选发布检查清单，不是发布授权。" in chinese
     assert "This is a release-candidate checklist, not a release authorization." not in chinese
+    assert (
+        "Record the actual protected merge SHA after exact-head gates and "
+        "pair-programming review are green." in english
+    )
+    assert "在精确 head 门与结对编程 review 全绿后，记录实际受保护 merge SHA。" not in english
+    assert "在精确 head 门与结对编程 review 全绿后，记录实际受保护 merge SHA。" in chinese
+    assert (
+        "Record the actual protected merge SHA after exact-head gates and "
+        "pair-programming review are green." not in chinese
+    )
