@@ -452,3 +452,30 @@ def test_starlight_contributing_is_bilingual(tmp_path: Path) -> None:
     assert 'href="../CONFIGURATION/#test-database-isolation"' in english
     assert 'href="../CONFIGURATION/#' in chinese
     assert 'href="../zh-cn/' not in chinese
+
+
+def test_starlight_cli_mcp_reference_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual CLI/MCP reference page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "cli-mcp-reference" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "cli-mcp-reference" / "index.html").read_text(encoding="utf-8")
+    assert (
+        "Both use the same configured search service, but their pagination surfaces "
+        "are intentionally different." in english
+    )
+    assert "两者使用同一个已配置的搜索服务，但分页接口有意采用不同形式。" not in english
+    assert "两者使用同一个已配置的搜索服务，但分页接口有意采用不同形式。" in chinese
+    assert (
+        "Both use the same configured search service, but their pagination surfaces "
+        "are intentionally different." not in chinese
+    )
