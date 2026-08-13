@@ -506,3 +506,13 @@ def test_starlight_design_is_bilingual(tmp_path: Path) -> None:
         "Shiori turns conversation history into semantically searchable memory through "
         "an ingestion and query pipeline." not in chinese
     )
+    assert (
+        "The ingestion and retrieval pipelines do not use it, while privacy lifecycle "
+        "operations still count, export, and delete legacy rows." in english
+    )
+    assert "摄取与检索管线不使用它，但隐私生命周期操作仍会统计、导出和删除 legacy 行。" not in english
+    assert "摄取与检索管线不使用它，但隐私生命周期操作仍会统计、导出和删除 legacy 行。" in chinese
+    assert (
+        "The ingestion and retrieval pipelines do not use it, while privacy lifecycle "
+        "operations still count, export, and delete legacy rows." not in chinese
+    )
