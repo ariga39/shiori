@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -607,3 +608,68 @@ def test_starlight_preserves_case_sensitive_stable_routes(tmp_path: Path) -> Non
     }
     missing = sorted(expected - generated)
     assert not missing, f"case-sensitive stable routes missing: {missing}"
+
+
+def test_starlight_navigation_is_explicit_and_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render an explicit bilingual sidebar."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
+
+    def sidebar(page: str) -> str:
+        start = page.index('<nav class="sidebar')
+        return page[start : page.index("</nav>", start) + len("</nav>")]
+
+    en_sidebar = sidebar(english)
+    zh_sidebar = sidebar(chinese)
+
+    for group in ("Start", "User guide", "Project"):
+        assert group in en_sidebar
+        assert group not in zh_sidebar
+    for group in ("开始", "用户指南", "项目"):
+        assert group in zh_sidebar
+        assert group not in en_sidebar
+
+    en_groups = [g for g in ("Start", "User guide", "Project") if g in en_sidebar]
+    assert [en_sidebar.index(g) for g in en_groups] == sorted(
+        en_sidebar.index(g) for g in en_groups
+    ), en_groups
+    zh_groups = [g for g in ("开始", "用户指南", "项目") if g in zh_sidebar]
+    assert [zh_sidebar.index(g) for g in zh_groups] == sorted(
+        zh_sidebar.index(g) for g in zh_groups
+    ), zh_groups
+
+    en_links = [
+        "/",
+        "/getting-started/",
+        "/CONFIGURATION/",
+        "/privacy-policy/",
+        "/cli-mcp-reference/",
+        "/DESIGN/",
+        "/contributing/",
+        "/adr/0001-atomic-rebuild-on-partial-embed-failure/",
+        "/RELEASE_CHECKLIST/",
+    ]
+    zh_links = [f"/zh-cn{link}" if link != "/" else "/zh-cn/" for link in en_links]
+
+    en_positions = [en_sidebar.find(f'href="{link}"') for link in en_links]
+    assert all(position >= 0 for position in en_positions), en_positions
+    assert en_positions == sorted(en_positions), en_positions
+    zh_positions = [zh_sidebar.find(f'href="{link}"') for link in zh_links]
+    assert all(position >= 0 for position in zh_positions), zh_positions
+    assert zh_positions == sorted(zh_positions), zh_positions
+
+    assert re.search(r'<option value="/"[^>]*>English</option>', english)
+    assert re.search(r'<option value="/zh-cn/"[^>]*>简体中文</option>', english)
+    assert re.search(r'<option value="/"[^>]*>English</option>', chinese)
+    assert re.search(r'<option value="/zh-cn/"[^>]*>简体中文</option>', chinese)
