@@ -479,3 +479,30 @@ def test_starlight_cli_mcp_reference_is_bilingual(tmp_path: Path) -> None:
         "Both use the same configured search service, but their pagination surfaces "
         "are intentionally different." not in chinese
     )
+
+
+def test_starlight_design_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual design page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "DESIGN" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "DESIGN" / "index.html").read_text(encoding="utf-8")
+    assert (
+        "Shiori turns conversation history into semantically searchable memory through "
+        "an ingestion and query pipeline." in english
+    )
+    assert "Shiori 是一个将对话会话历史加工成语义可检索记忆的摄取与查询管线。" not in english
+    assert "Shiori 是一个将对话会话历史加工成语义可检索记忆的摄取与查询管线。" in chinese
+    assert (
+        "Shiori turns conversation history into semantically searchable memory through "
+        "an ingestion and query pipeline." not in chinese
+    )
