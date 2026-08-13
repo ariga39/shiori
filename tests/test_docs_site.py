@@ -709,22 +709,25 @@ def test_starlight_llms_txt_is_bilingual_and_public(tmp_path: Path) -> None:
     assert "## 简体中文" in rendered
     assert "https://raw.githubusercontent.com/ariga39/shiori/main/docs/" not in rendered
 
-    base = "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
-    english_paths = [
-        "index.md",
-        "getting-started.md",
-        "CONFIGURATION.md",
-        "privacy-policy.md",
-        "cli-mcp-reference.md",
-        "DESIGN.md",
-        "contributing.md",
-        "adr/0001-atomic-rebuild-on-partial-embed-failure.md",
-        "RELEASE_CHECKLIST.md",
-    ]
     expected_urls = [
-        base + path for path in english_paths
-    ] + [
-        base + f"zh-cn/{path}" for path in english_paths
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/index.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/getting-started.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/CONFIGURATION.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/privacy-policy.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/cli-mcp-reference.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/DESIGN.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/contributing.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/adr/0001-atomic-rebuild-on-partial-embed-failure.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/RELEASE_CHECKLIST.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/index.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/getting-started.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/CONFIGURATION.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/privacy-policy.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/cli-mcp-reference.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/DESIGN.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/contributing.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/adr/0001-atomic-rebuild-on-partial-embed-failure.md",
+        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/RELEASE_CHECKLIST.md",
     ]
     positions = [rendered.find(url) for url in expected_urls]
     assert all(position >= 0 for position in positions), positions
