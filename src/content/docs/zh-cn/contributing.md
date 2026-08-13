@@ -21,7 +21,7 @@ uv sync --locked --extra dev
 uv run pytest -q
 ```
 
-数据库测试需要[配置参考](../zh-cn/CONFIGURATION/#test-database-isolation)中描述的隔离设置。跳过的测试是未验证的能力，而不是通过的结果。请显式报告跳过与环境受限的失败。
+数据库测试需要[配置参考](../CONFIGURATION/#测试数据库隔离)中描述的隔离设置。跳过的测试是未验证的能力，而不是通过的结果。请显式报告跳过与环境受限的失败。
 
 ## 文档
 
