@@ -449,3 +449,6 @@ def test_starlight_contributing_is_bilingual(tmp_path: Path) -> None:
         "Keep changes narrowly scoped, test them through public behavior, and report "
         "what was and was not verified." not in chinese
     )
+    assert 'href="../CONFIGURATION/#test-database-isolation"' in english
+    assert 'href="../CONFIGURATION/#' in chinese
+    assert 'href="../zh-cn/' not in chinese
