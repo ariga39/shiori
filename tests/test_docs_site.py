@@ -547,3 +547,24 @@ def test_starlight_atomic_rebuild_adr_is_bilingual(tmp_path: Path) -> None:
         "Choose option 1: atomic full rebuild. Embeddings are prepared before deletion, "
         "and delete plus insert remains transactional." not in chinese
     )
+
+
+def test_starlight_release_checklist_is_bilingual(tmp_path: Path) -> None:
+    """The public Starlight build must render a bilingual release checklist page."""
+    site_dir = tmp_path / "site"
+
+    result = subprocess.run(
+        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (site_dir / "RELEASE_CHECKLIST" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "RELEASE_CHECKLIST" / "index.html").read_text(encoding="utf-8")
+    assert "This is a release-candidate checklist, not a release authorization." in english
+    assert "这是一份候选发布检查清单，不是发布授权。" not in english
+    assert "这是一份候选发布检查清单，不是发布授权。" in chinese
+    assert "This is a release-candidate checklist, not a release authorization." not in chinese
