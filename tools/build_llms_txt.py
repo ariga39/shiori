@@ -130,6 +130,14 @@ def _starlight_nav(root: Path) -> tuple[str, list[str]]:
         label = group.get("label")
         if not isinstance(label, str) or not label.strip():
             raise LlmsTxtError("sidebar group labels must be non-empty strings")
+        translations = group.get("translations")
+        if not isinstance(translations, dict):
+            raise LlmsTxtError("sidebar group translations must be a mapping")
+        zh_label = translations.get("zh-CN")
+        if not isinstance(zh_label, str) or not zh_label.strip():
+            raise LlmsTxtError(
+                "sidebar group translations must include a non-empty zh-CN label"
+            )
         items = group.get("items")
         if not isinstance(items, list) or not items:
             raise LlmsTxtError("sidebar group items must be non-empty lists")
