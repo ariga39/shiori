@@ -217,8 +217,8 @@ requires-python = ">=3.11"
     assert (tmp_path / "docs" / "llms.txt").read_bytes() == expected
 
 
-def test_docs_check_builds_site_and_llms_index(tmp_path: Path) -> None:
-    """The public docs check must validate and build both human and LLM docs."""
+def test_docs_check_builds_bilingual_starlight_site_and_llms_index(tmp_path: Path) -> None:
+    """The public docs check must build the bilingual Starlight site and LLM index."""
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
@@ -237,7 +237,12 @@ def test_docs_check_builds_site_and_llms_index(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout == "docs-check: ok\n"
     assert result.stderr == ""
-    assert "Shiori" in (site_dir / "index.html").read_text(encoding="utf-8")
+    english = (site_dir / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    assert "Searchable long-term memory for AI agents." in english
+    assert "面向 AI 智能体的可搜索长期记忆。" not in english
+    assert "面向 AI 智能体的可搜索长期记忆。" in chinese
+    assert "Searchable long-term memory for AI agents." not in chinese
     assert (site_dir / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
 
 
