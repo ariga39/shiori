@@ -532,3 +532,34 @@ def test_llms_txt_rejects_navigation_without_chinese_group_translation(tmp_path:
     assert check.returncode == 1
     assert check.stdout == ""
     assert check.stderr == "llms.txt is out of date\n"
+
+
+def test_workers_dry_run_packages_bilingual_starlight_site(tmp_path: Path) -> None:
+    """The public Workers dry-run must package the bilingual Starlight site."""
+    bundle_dir = tmp_path / "worker-bundle"
+
+    result = subprocess.run(
+        [
+            "npm",
+            "run",
+            "docs:workers:dry-run",
+            "--",
+            "--outdir",
+            str(bundle_dir),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    english = (ROOT / "dist" / "index.html").read_text(encoding="utf-8")
+    chinese = (ROOT / "dist" / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    assert "Searchable long-term memory for AI agents." in english
+    assert "面向 AI 智能体的可搜索长期记忆。" not in english
+    assert "面向 AI 智能体的可搜索长期记忆。" in chinese
+    assert "Searchable long-term memory for AI agents." not in chinese
+    assert (ROOT / "dist" / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
+    assert bundle_dir.is_dir()
+    assert any(path.is_file() for path in bundle_dir.rglob("*"))
