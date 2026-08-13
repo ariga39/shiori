@@ -603,7 +603,7 @@ def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path:
     )
     for page in (english, chinese):
         assert "npm run docs:build" in page
-        assert "npm exec wrangler deploy -- --config wrangler.jsonc" in page
+        assert "npm exec -- wrangler deploy --config wrangler.jsonc" in page
     assert (
         "Do not commit Cloudflare account IDs, Worker identifiers, routes, domains, or "
         "API tokens to this repository." in english
