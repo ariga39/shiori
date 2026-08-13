@@ -1,4 +1,7 @@
-# Privacy Policy
+---
+title: Privacy Policy
+description: This document states the local data-minimization and lifecycle contract that the ingestion and privacy seams enforce.
+---
 
 Shiori stores searchable long-term memory for AI agents. This document states
 the local data-minimization and lifecycle contract that the ingestion and

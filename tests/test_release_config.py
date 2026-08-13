@@ -100,7 +100,7 @@ def test_manifest_contains_runtime_release_references() -> None:
     assert "include tools/db_count.py" in manifest
     assert "recursive-include tools/e2e-replay-sessions *.jsonl" in manifest
     assert "recursive-include tests/fixtures/replay *.jsonl *.json" in manifest
-    assert "recursive-include docs *.md" in manifest
+    assert "recursive-include src/content/docs *.md" in manifest
     assert "include THIRD_PARTY_NOTICES.md" in manifest
 
 
@@ -125,3 +125,24 @@ def test_schema_sql_resolvable_from_package() -> None:
     assert schema_path.name == "schema.sql"
     text = schema_path.read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS session_chunks" in text
+
+
+def test_ci_verifies_bilingual_docs_and_workers_bundle_with_locked_node_dependencies() -> None:
+    """CI must install locked Node deps and verify the docs and Workers bundle."""
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    expected = [
+        "uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
+        "node-version: '26.7.0'",
+        "cache: npm",
+        "Install locked documentation dependencies",
+        "run: npm ci",
+        "Check documentation site and LLM index",
+        'uv run python tools/docs_check.py --site-dir "${RUNNER_TEMP}/shiori-docs-site"',
+        "Verify Cloudflare Workers Static Assets bundle",
+        'npm run docs:workers:dry-run -- --outdir "${RUNNER_TEMP}/shiori-workers-bundle"',
+    ]
+    positions = [workflow.find(literal) for literal in expected]
+    assert all(position >= 0 for position in positions), positions
+    assert positions == sorted(positions), positions
+    assert "wrangler deploy --config" not in workflow

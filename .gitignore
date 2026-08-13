@@ -25,3 +25,7 @@ venv.bak*/
 *.key
 *credentials*
 publish-task.md
+
+# Node / Astro
+node_modules/
+.astro/

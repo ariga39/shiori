@@ -1,4 +1,7 @@
-# Getting started
+---
+title: Getting started
+description: This guide follows Shiori's supported local lifecycle from a locked development install through its read-only MCP server.
+---
 
 This guide follows Shiori's supported local lifecycle from a locked development
 install through its read-only MCP server.
@@ -14,8 +17,8 @@ uv sync --locked --extra dev
 ## Configure
 
 Set the explicit database, source, and embedding-provider values described in
-the [configuration reference](CONFIGURATION.md). Review the
-[privacy policy](privacy-policy.md) before ingesting an archive. Shiori has no
+the [configuration reference](../CONFIGURATION/). Review the
+[privacy policy](../privacy-policy/) before ingesting an archive. Shiori has no
 implicit source, credential, or provider paths.
 
 ## Migrate

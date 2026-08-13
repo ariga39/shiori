@@ -1,4 +1,7 @@
-# Contributing
+---
+title: Contributing
+description: Keep changes narrowly scoped, test them through public behavior, and report what was and was not verified.
+---
 
 Keep changes narrowly scoped, test them through public behavior, and report
 what was and was not verified.
@@ -20,26 +23,21 @@ uv run pytest -q
 ```
 
 Database tests require the isolated settings described in the
-[configuration reference](CONFIGURATION.md#test-database-isolation). A skipped
+[configuration reference](../CONFIGURATION/#test-database-isolation). A skipped
 test is an unverified capability, not a passing result. Report skips and
 environment-limited failures explicitly.
 
 ## Documentation
 
-Build documentation with warnings treated as errors:
+Build the documentation site locally with the public Starlight script:
 
 ```bash
-uv run mkdocs build --strict
+npm run docs:build
 ```
 
-For a local preview only, run:
-
-```bash
-uv run mkdocs serve
-```
-
-The preview command does not deploy or publish the site. Documentation source
-stays as Markdown under `docs/`, with navigation defined in `mkdocs.yml`.
+This only builds the site locally and does not deploy or publish it.
+Documentation source stays as Markdown under `src/content/docs/`, with English
+as the root locale and Simplified Chinese under `zh-cn/`.
 
 ## Pull requests
 

@@ -20,10 +20,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "mkdocs==1.6.1",
   "pip-audit==2.9.0",
   "pyright>=1.1,<2",
   "pytest>=8.3,<9",
+  "pyyaml==6.0.3",
   "ruff>=0.9,<1",
   "setuptools>=75,<80",
   "towncrier==25.8.0",
