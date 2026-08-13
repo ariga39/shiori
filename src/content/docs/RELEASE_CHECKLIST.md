@@ -1,6 +1,7 @@
 ---
 title: "shiori v0.1.0 private release-candidate checklist"
 description: This is a release-candidate checklist, not a release authorization.
+slug: RELEASE_CHECKLIST
 ---
 
 This is a release-candidate checklist, not a release authorization. The

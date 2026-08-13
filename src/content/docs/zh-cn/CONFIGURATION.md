@@ -1,6 +1,7 @@
 ---
 title: 配置契约
 description: 这是当前的运行时契约。旧的 docs/DESIGN.md 是历史实现记录，不是默认路径的来源。
+slug: zh-cn/CONFIGURATION
 ---
 
 这是当前的运行时契约。旧的 `docs/DESIGN.md` 是历史实现记录，不是默认路径的来源。

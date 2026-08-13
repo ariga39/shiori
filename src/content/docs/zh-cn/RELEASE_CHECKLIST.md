@@ -1,6 +1,7 @@
 ---
 title: "shiori v0.1.0 私有候选发布检查清单"
 description: 这是一份候选发布检查清单，不是发布授权。
+slug: zh-cn/RELEASE_CHECKLIST
 ---
 
 这是一份候选发布检查清单，不是发布授权。在 owner 另行做出可见性决定之前，仓库保持私有。本清单不得作为创建 tag 或 release、发布包、推送镜像、部署、注册外部服务或写入生产环境的一部分。

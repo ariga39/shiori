@@ -1,6 +1,7 @@
 ---
 title: 设计
 description: Shiori 是一个将对话会话历史加工成语义可检索记忆的摄取与查询管线。
+slug: zh-cn/DESIGN
 ---
 
 Shiori 是一个将对话会话历史加工成语义可检索记忆的摄取与查询管线。本文档描述当前架构。早期 `session-memory-pg` 实现的历史材料（旧脚本名、`python3 ingest.py`/`query.py` 调用与 OpenClaw 默认路径）仅在下方作为明确标注的 legacy 语境保留，不是当前主路径。安装、配置与运行时契约以根目录 `README.md`、`pyproject.toml`、`shiori.config.Settings` 与 `CONFIGURATION` 为准。

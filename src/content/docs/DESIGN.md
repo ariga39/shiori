@@ -1,6 +1,7 @@
 ---
 title: Design
 description: Shiori turns conversation history into semantically searchable memory through an ingestion and query pipeline.
+slug: DESIGN
 ---
 
 Shiori turns conversation history into semantically searchable memory through an ingestion and query pipeline. This document describes the current architecture. Historical material from the earlier `session-memory-pg` implementation (old script names, `python3 ingest.py`/`query.py` invocations, and OpenClaw default paths) is preserved below only as clearly labeled legacy context and is not the current main path. The installation, configuration, and runtime contracts are authoritative in the root `README.md`, `pyproject.toml`, `shiori.config.Settings`, and `CONFIGURATION`.
