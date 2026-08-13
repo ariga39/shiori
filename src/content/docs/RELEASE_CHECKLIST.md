@@ -16,8 +16,7 @@ checklist.
       a stale main branch.
 - [ ] Record hosted CI run IDs against that exact commit.
 - [ ] Record the pair-programming review GO against that exact commit.
-- [ ] Record final owner acceptance and the actual protected merge SHA, if the
-      candidate is approved for merge.
+- [ ] Record the actual protected merge SHA after exact-head gates and pair-programming review are green.
 
 ## Required engineering gates
 

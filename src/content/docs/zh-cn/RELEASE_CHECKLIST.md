@@ -11,7 +11,7 @@ description: 这是一份候选发布检查清单，不是发布授权。
 - [ ] 确认候选 worktree 干净，且候选不是基于过期的 main 分支。
 - [ ] 记录针对该精确 commit 的 hosted CI run ID。
 - [ ] 记录针对该精确 commit 的结对编程 review GO。
-- [ ] 若候选被批准合并，记录 owner 最终验收与实际受保护 merge SHA。
+- [ ] 在精确 head 门与结对编程 review 全绿后，记录实际受保护 merge SHA。
 
 ## 必需工程门（Required engineering gates）
 
