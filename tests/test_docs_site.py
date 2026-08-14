@@ -667,3 +667,59 @@ def test_docs_site_project_builds_from_user_docs_directory(tmp_path: Path) -> No
         "public",
     ):
         assert not (ROOT / path).exists(), f"repo-root {path} must be contained in docs-site"
+
+
+def test_user_docs_exclude_internal_project_material(tmp_path: Path) -> None:
+    """Public-subprocess genuine red: the user-facing bilingual site must NOT
+    render internal engineering material (Design, contributing, ADRs, release
+    checklist) as site routes, and those documents must live only as
+    monolingual internal files outside the user `docs/` tree.
+
+    The current head still has the internal pages in `docs/` (DESIGN.md,
+    contributing.md, adr/, RELEASE_CHECKLIST.md), so the build succeeds but the
+    first "internal route absent" assertion must fail.
+    """
+    site_dir = tmp_path / "site"
+
+    proc = subprocess.run(
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    internal_routes = [
+        "DESIGN",
+        "contributing",
+        "adr/0001-atomic-rebuild-on-partial-embed-failure",
+        "RELEASE_CHECKLIST",
+    ]
+    for route in internal_routes:
+        assert not (site_dir / route).exists(), f"site must not render {route} route"
+        assert not (site_dir / "zh-cn" / route).exists(), f"site must not render zh-cn/{route} route"
+
+    internal_files = [
+        "CONTRIBUTING.md",
+        "architecture/DESIGN.md",
+        "architecture/decisions/0001-atomic-rebuild-on-partial-embed-failure.md",
+        "maintainers/RELEASE_CHECKLIST.md",
+    ]
+    for rel in internal_files:
+        assert (ROOT / rel).is_file(), f"monolingual internal source missing: {rel}"
+
+    for rel in (
+        "DESIGN.md",
+        "contributing.md",
+        "adr/0001-atomic-rebuild-on-partial-embed-failure.md",
+        "RELEASE_CHECKLIST.md",
+    ):
+        assert not (ROOT / "docs" / rel).exists(), f"docs/ must not contain internal file {rel}"
+        assert not (ROOT / "docs" / "zh-cn" / rel).exists(), f"docs/zh-cn must not contain internal file {rel}"
+
+    en_home = (site_dir / "index.html").read_text(encoding="utf-8")
+    zh_home = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    for page in (en_home, zh_home):
+        assert 'href="/deployment/cloudflare-workers/"' in page or 'href="/zh-cn/deployment/cloudflare-workers/"' in page
+    for label in ("Project", "项目"):
+        assert label not in en_home and label not in zh_home
