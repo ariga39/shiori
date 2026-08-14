@@ -624,3 +624,46 @@ def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path:
         "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
         "zh-cn/deployment/cloudflare-workers.md" in rendered
     )
+
+
+def test_docs_site_project_builds_from_user_docs_directory(tmp_path: Path) -> None:
+    """Public-subprocess genuine red: the independent site project must live in
+    `docs-site/` and build the bilingual site from the repository user-docs
+    directory `docs/`, keeping the Python repo root free of the Astro/npm/
+    Wrangler frontend project files.
+
+    The current main has the Astro project scattered at the repo root
+    (package.json, src/, public/, astro.config.mjs, docs-navigation.json,
+    wrangler.jsonc), so `npm --prefix docs-site run docs:build` fails closed at
+    the missing `docs-site/package.json` (ENOENT) and this node must red on the
+    first literal returncode assertion.
+    """
+    site_dir = tmp_path / "site"
+
+    proc = subprocess.run(
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    assert proc.returncode == 0, proc.stderr
+
+    en = (site_dir / "index.html").read_text(encoding="utf-8")
+    zh = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    assert "Searchable long-term memory for AI agents." in en
+    assert "面向 AI 智能体的可搜索长期记忆。" in zh
+    assert "面向 AI 智能体的可搜索长期记忆。" not in en
+    assert "Searchable long-term memory for AI agents." not in zh
+
+    assert (ROOT / "docs" / "index.md").is_file()
+    assert (ROOT / "docs" / "zh-cn" / "index.md").is_file()
+    for path in (
+        "package.json",
+        "package-lock.json",
+        "astro.config.mjs",
+        "docs-navigation.json",
+        "wrangler.jsonc",
+        "src",
+        "public",
+    ):
+        assert not (ROOT / path).exists(), f"repo-root {path} must be contained in docs-site"
