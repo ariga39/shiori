@@ -13,4 +13,7 @@ recursive-include tools/e2e-replay-sessions *.jsonl
 recursive-include tests/fixtures/replay *.jsonl *.json
 recursive-include shiori *.sql
 include THIRD_PARTY_NOTICES.md
-recursive-include src/content/docs *.md
+recursive-include docs *.md
+include CONTRIBUTING.md
+recursive-include architecture *.md
+recursive-include maintainers *.md

@@ -15,11 +15,11 @@ Install the pinned Node dependencies and verify the static build and the
 Workers dry-run locally before relying on Cloudflare:
 
 ```bash
-npm ci
-npm run docs:workers:dry-run -- --outdir /tmp/shiori-worker-bundle
+npm --prefix docs-site ci
+npm --prefix docs-site run docs:workers:dry-run -- --outdir /tmp/shiori-worker-bundle
 ```
 
-The dry-run builds `dist/` and packages it without uploading anything. No
+The dry-run builds `docs-site/dist/` and packages it without uploading anything. No
 authentication, account, or network upload happens during the dry-run.
 
 ## Cloudflare Workers Builds configuration
@@ -30,6 +30,7 @@ the Cloudflare side.
 
 The repository provides only the project-level configuration:
 
+- **Root directory:** `docs-site`
 - **Build command:** `npm run docs:build`
 - **Deploy command:** `npm exec -- wrangler deploy --config wrangler.jsonc`
 - **Build output directory:** `dist/` (the site root is `/`)

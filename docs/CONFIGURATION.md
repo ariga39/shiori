@@ -1,10 +1,10 @@
 ---
 title: Configuration contract
-description: This is the current runtime contract. The older docs/DESIGN.md is a historical implementation record and is not a source of default paths.
+description: This is the current runtime contract. The internal architecture/DESIGN.md is a historical implementation record and is not a source of default paths.
 slug: CONFIGURATION
 ---
 
-This is the current runtime contract. The older `docs/DESIGN.md` is a
+This is the current runtime contract. The internal `architecture/DESIGN.md` is a
 historical implementation record and is not a source of default paths.
 
 ## Resolution and validation

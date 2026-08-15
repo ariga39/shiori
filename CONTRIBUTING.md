@@ -23,7 +23,7 @@ uv run pytest -q
 ```
 
 Database tests require the isolated settings described in the
-[configuration reference](../CONFIGURATION/#test-database-isolation). A skipped
+[configuration reference](docs/CONFIGURATION.md#test-database-isolation). A skipped
 test is an unverified capability, not a passing result. Report skips and
 environment-limited failures explicitly.
 
@@ -32,12 +32,15 @@ environment-limited failures explicitly.
 Build the documentation site locally with the public Starlight script:
 
 ```bash
-npm run docs:build
+npm --prefix docs-site run docs:build
 ```
 
 This only builds the site locally and does not deploy or publish it.
-Documentation source stays as Markdown under `src/content/docs/`, with English
-as the root locale and Simplified Chinese under `zh-cn/`.
+End-user documentation stays as Markdown under `docs/`, with English as the
+root locale and Simplified Chinese under `docs/zh-cn/`. The Astro/Starlight
+project lives under `docs-site/`; internal contributor, architecture, and
+maintainer documents remain outside the user-documentation tree and do not
+require translated copies.
 
 ## Pull requests
 

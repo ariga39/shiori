@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS ingestion_state (
 
 -- ── session_facts ─────────────────────────────────────────────────────────
 -- Present in the live DB (10 columns). No source file references it today;
--- documented here for schema fidelity (see docs/DESIGN.md §3.3).
+-- documented here for schema fidelity (see architecture/DESIGN.md §3.3).
 CREATE TABLE IF NOT EXISTS session_facts (
     id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     session_id       text NOT NULL,
@@ -91,7 +91,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_tsvector
 CREATE INDEX IF NOT EXISTS idx_chunks_time
     ON session_chunks USING btree (timestamp_start);
 
--- session_facts indexes (mirror live; see docs/DESIGN.md §3.3).
+-- session_facts indexes (mirror live; see architecture/DESIGN.md §3.3).
 CREATE INDEX IF NOT EXISTS idx_facts_category
     ON session_facts USING btree (category);
 

@@ -32,7 +32,16 @@ def main(argv: list[str] | None = None) -> int:
 
     commands = [
         [sys.executable, str(ROOT / "tools" / "build_llms_txt.py"), "--check"],
-        ["npm", "run", "docs:build", "--", "--outDir", str(args.site_dir.resolve())],
+        [
+            "npm",
+            "--prefix",
+            "docs-site",
+            "run",
+            "docs:build",
+            "--",
+            "--outDir",
+            str(args.site_dir.resolve()),
+        ],
     ]
     for command in commands:
         returncode = _run(command)

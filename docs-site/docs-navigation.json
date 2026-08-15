@@ -1,0 +1,15 @@
+{
+  "rawBase": "https://raw.githubusercontent.com/ariga39/shiori/main/docs/",
+  "sidebar": [
+    {
+      "label": "Start",
+      "translations": { "zh-CN": "开始" },
+      "items": ["index", "getting-started"]
+    },
+    {
+      "label": "User guide",
+      "translations": { "zh-CN": "用户指南" },
+      "items": ["CONFIGURATION", "privacy-policy", "cli-mcp-reference", "deployment/cloudflare-workers"]
+    }
+  ]
+}
