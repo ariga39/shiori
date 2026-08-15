@@ -221,7 +221,7 @@ The private release candidate is not a public release: CI does not create a
 tag, publish a package, push an image, deploy, register an external service,
 or change repository visibility.
 The complete gate list and known limitations are recorded in
-`src/content/docs/RELEASE_CHECKLIST.md`.
+`maintainers/RELEASE_CHECKLIST.md`.
 
 ## Search behavior
 
