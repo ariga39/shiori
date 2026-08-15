@@ -42,6 +42,7 @@ jobs:
         with:
           node-version: '26.7.0'
           cache: npm
+          cache-dependency-path: docs-site/package-lock.json
 
       - uses: astral-sh/setup-uv@557e51de59eb14aaaba2ed9621916900a91d50c6 # v6.6.1
         with:
@@ -51,7 +52,7 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: Install locked documentation dependencies
-        run: npm ci
+        run: npm --prefix docs-site ci
 
       - name: Check changelog fragment
         if: github.event_name == 'pull_request'
@@ -82,7 +83,7 @@ jobs:
         run: uv run python tools/docs_check.py --site-dir "${RUNNER_TEMP}/shiori-docs-site"
 
       - name: Verify Cloudflare Workers Static Assets bundle
-        run: npm run docs:workers:dry-run -- --outdir "${RUNNER_TEMP}/shiori-workers-bundle"
+        run: npm --prefix docs-site run docs:workers:dry-run -- --outdir "${RUNNER_TEMP}/shiori-workers-bundle"
 
       - name: Type-check installable package
         run: uv run pyright
@@ -250,7 +251,7 @@ jobs:
 
       - name: Audit reachable history and public build artifacts
         shell: bash
-        run: uv run python tools/release_audit.py --root . --artifact-dir dist
+        run: uv run python tools/release_audit.py --root . --artifact-dir docs-site/dist
 
       - name: Prepare redacted failure evidence
         if: ${{ failure() }}
