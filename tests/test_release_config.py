@@ -100,8 +100,16 @@ def test_manifest_contains_runtime_release_references() -> None:
     assert "include tools/db_count.py" in manifest
     assert "recursive-include tools/e2e-replay-sessions *.jsonl" in manifest
     assert "recursive-include tests/fixtures/replay *.jsonl *.json" in manifest
-    assert "recursive-include src/content/docs *.md" in manifest
+    assert "recursive-include docs *.md" in manifest
+    assert "include CONTRIBUTING.md" in manifest
+    assert "recursive-include architecture *.md" in manifest
+    assert "recursive-include maintainers *.md" in manifest
+    assert "src/content/docs" not in manifest
     assert "include THIRD_PARTY_NOTICES.md" in manifest
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "`maintainers/RELEASE_CHECKLIST.md`" in readme
+    assert "src/content/docs/RELEASE_CHECKLIST.md" not in readme
 
 
 def test_schema_sql_ships_as_package_data() -> None:
