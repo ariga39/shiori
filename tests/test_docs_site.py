@@ -631,8 +631,13 @@ def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path:
         "repository commands below." not in chinese
     )
     for page in (english, chinese):
+        assert "npm --prefix docs-site ci" in page
+        assert "npm --prefix docs-site run docs:workers:dry-run" in page
         assert "npm run docs:build" in page
         assert "npm exec -- wrangler deploy --config wrangler.jsonc" in page
+        assert "docs-site" in page
+    assert "Root directory:" in english
+    assert "根目录：" in chinese
     assert (
         "Do not commit Cloudflare account IDs, Worker identifiers, routes, domains, or "
         "API tokens to this repository." in english
