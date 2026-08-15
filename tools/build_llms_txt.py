@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check the deterministic llms.txt index derived from the shared navigation.
 
-The index is always derived from the repository-root ``docs-navigation.json``,
-which is also consumed by the Astro Starlight sidebar, producing bilingual
-English + Simplified Chinese sections.
+The index is derived from ``docs-site/docs-navigation.json``, which is also
+consumed by the contained Astro Starlight project, and the bilingual end-user
+Markdown sources under the repository ``docs/`` directory.
 """
 
 from __future__ import annotations
@@ -39,7 +39,9 @@ def _frontmatter_title(path: Path) -> str:
 
 
 def _starlight_nav(root: Path) -> tuple[str, list[str]]:
-    nav = json.loads((root / "docs-navigation.json").read_text(encoding="utf-8"))
+    nav = json.loads(
+        (root / "docs-site" / "docs-navigation.json").read_text(encoding="utf-8")
+    )
     if not isinstance(nav, dict):
         raise LlmsTxtError("docs-navigation.json must contain an object")
 
@@ -85,7 +87,7 @@ def _starlight_nav(root: Path) -> tuple[str, list[str]]:
                 raise LlmsTxtError("sidebar items must be unique")
             slugs.append(item)
 
-    content_root = (root / "src" / "content" / "docs").resolve()
+    content_root = (root / "docs").resolve()
     for slug in slugs:
         for prefix in ("", "zh-cn/"):
             source = (content_root / f"{prefix}{slug}.md").resolve()
@@ -102,7 +104,7 @@ def _starlight_render(root: Path) -> str:
         "project"
     ]
     description = str(project["description"]).rstrip(".") + "."
-    content_root = root / "src" / "content" / "docs"
+    content_root = root / "docs"
 
     lines = ["# Shiori", "", f"> {description}", "", "## English", ""]
     for slug in slugs:
@@ -130,8 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     root = args.dir.resolve()
 
-    outputs = (root / "llms.txt", root / "public" / "llms.txt")
-    write_message = "wrote llms.txt and public/llms.txt"
+    outputs = (root / "llms.txt", root / "docs-site" / "public" / "llms.txt")
+    write_message = "wrote llms.txt and docs-site/public/llms.txt"
 
     try:
         expected = _starlight_render(root).encode("utf-8")
