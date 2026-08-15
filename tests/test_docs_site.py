@@ -38,6 +38,35 @@ def test_docs_check_builds_bilingual_starlight_site_and_llms_index(tmp_path: Pat
     assert "Searchable long-term memory for AI agents." not in chinese
     assert (site_dir / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
 
+    rendered = (ROOT / "llms.txt").read_text(encoding="utf-8")
+    raw_base = "https://raw.githubusercontent.com/ariga39/shiori/main/docs/"
+    expected_urls = [
+        f"{raw_base}index.md",
+        f"{raw_base}getting-started.md",
+        f"{raw_base}CONFIGURATION.md",
+        f"{raw_base}privacy-policy.md",
+        f"{raw_base}cli-mcp-reference.md",
+        f"{raw_base}deployment/cloudflare-workers.md",
+        f"{raw_base}zh-cn/index.md",
+        f"{raw_base}zh-cn/getting-started.md",
+        f"{raw_base}zh-cn/CONFIGURATION.md",
+        f"{raw_base}zh-cn/privacy-policy.md",
+        f"{raw_base}zh-cn/cli-mcp-reference.md",
+        f"{raw_base}zh-cn/deployment/cloudflare-workers.md",
+    ]
+    positions = [rendered.find(url) for url in expected_urls]
+    assert all(position >= 0 for position in positions), positions
+    assert positions == sorted(positions), positions
+    assert rendered.count(raw_base) == 12
+    for forbidden in (
+        "src/content/docs",
+        "DESIGN.md",
+        "contributing.md",
+        "adr/",
+        "RELEASE_CHECKLIST.md",
+    ):
+        assert forbidden not in rendered
+
 
 def test_starlight_site_builds_bilingual_homepages(tmp_path: Path) -> None:
     """The public Starlight build must render English and Simplified Chinese homepages."""
