@@ -12,11 +12,11 @@ description: 在 Cloudflare Workers Builds 中连接此仓库，然后使用下�
 在依赖 Cloudflare 之前，安装锁定的 Node 依赖并在本地验证静态构建与 Workers dry-run：
 
 ```bash
-npm ci
-npm run docs:workers:dry-run -- --outdir /tmp/shiori-worker-bundle
+npm --prefix docs-site ci
+npm --prefix docs-site run docs:workers:dry-run -- --outdir /tmp/shiori-worker-bundle
 ```
 
-dry-run 构建 `dist/` 并打包，不上传任何内容。dry-run 期间不进行认证、不访问账户、不发起网络上传。
+dry-run 构建 `docs-site/dist/` 并打包，不上传任何内容。dry-run 期间不进行认证、不访问账户、不发起网络上传。
 
 ## Cloudflare Workers Builds 配置
 
@@ -24,6 +24,7 @@ owner 在 Cloudflare dashboard 中关联此 GitHub 仓库，选择生产分支�
 
 仓库只提供项目级配置：
 
+- **根目录：** `docs-site`
 - **Build command：** `npm run docs:build`
 - **Deploy command：** `npm exec -- wrangler deploy --config wrangler.jsonc`
 - **Build output directory：** `dist/`（站点根路径为 `/`）
