@@ -112,6 +112,39 @@ def test_manifest_contains_runtime_release_references() -> None:
     assert "src/content/docs/RELEASE_CHECKLIST.md" not in readme
 
 
+def test_repository_docs_reference_the_contained_site_project() -> None:
+    """Contributor, maintainer, and reference docs must use the split layout."""
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    checklist = (ROOT / "maintainers" / "RELEASE_CHECKLIST.md").read_text(
+        encoding="utf-8"
+    )
+    configuration = (ROOT / "docs" / "CONFIGURATION.md").read_text(encoding="utf-8")
+    configuration_zh = (ROOT / "docs" / "zh-cn" / "CONFIGURATION.md").read_text(
+        encoding="utf-8"
+    )
+    cli_reference = (ROOT / "docs" / "cli-mcp-reference.md").read_text(
+        encoding="utf-8"
+    )
+    cli_reference_zh = (ROOT / "docs" / "zh-cn" / "cli-mcp-reference.md").read_text(
+        encoding="utf-8"
+    )
+    schema = (ROOT / "shiori" / "schema.sql").read_text(encoding="utf-8")
+
+    assert "npm --prefix docs-site run docs:build" in contributing
+    assert "Markdown under `docs/`" in contributing
+    assert "src/content/docs" not in contributing
+    assert "npm --prefix docs-site ci" in checklist
+    assert "npm --prefix docs-site run docs:build -- --outDir <temp>" in checklist
+
+    for page in (configuration, configuration_zh):
+        assert "architecture/DESIGN.md" in page
+        assert "docs/DESIGN.md" not in page
+    for page in (cli_reference, cli_reference_zh):
+        assert "../DESIGN/" not in page
+    assert "architecture/DESIGN.md" in schema
+    assert "docs/DESIGN.md" not in schema
+
+
 def test_schema_sql_ships_as_package_data() -> None:
     """schema.sql must ship inside the wheel so a fresh-DB migrate on an
     installed package resolves it (regression for the pre-existing wheel gap)."""
