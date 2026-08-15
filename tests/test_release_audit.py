@@ -116,7 +116,16 @@ def test_release_audit_accepts_only_unchanged_pinned_starlight_vendor_attributio
     artifact = tmp_path / "artifact"
 
     build = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(artifact)],
+        [
+            "npm",
+            "--prefix",
+            "docs-site",
+            "run",
+            "docs:build",
+            "--",
+            "--outDir",
+            str(artifact),
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
