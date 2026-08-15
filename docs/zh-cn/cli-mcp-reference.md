@@ -30,7 +30,7 @@ Explain 诊断输出到 stderr，因此正常结果文本仍可管道传输。�
 
 ## MCP search
 
-MCP 服务器暴露名为 `search` 的单个工具。其输入包含 query、`limit`、裸 `offset`、相同的结构化过滤器与可选的 `explain`。响应包含 `results`、`count`、`limit`、`offset`、`has_more` 与 `next_offset`。启用解释时还包含[设计](../DESIGN/)中记录的附加解释字段。
+MCP 服务器暴露名为 `search` 的单个工具。其输入包含 query、`limit`、裸 `offset`、相同的结构化过滤器与可选的 `explain`。响应包含 `results`、`count`、`limit`、`offset`、`has_more` 与 `next_offset`。启用解释时还包含附加的分数语义、检索通道证据、交叉印证与来源字段。
 
 MCP 表面是只读的：它不能摄取、迁移、删除、导出或修改源数据。
 

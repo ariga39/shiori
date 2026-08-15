@@ -23,8 +23,8 @@ checklist.
 
 - [ ] `uv sync --locked --extra dev`, `uv lock --check`, Ruff, Pyright, and the
       full unit suite pass.
-- [ ] `npm ci` installs the pinned Node dependencies, and the public
-      `npm run docs:build -- --outDir <temp>` builds the documentation site
+- [ ] `npm --prefix docs-site ci` installs the pinned Node dependencies, and the
+      public `npm --prefix docs-site run docs:build -- --outDir <temp>` builds the documentation site
       into an explicitly specified temporary directory.
 - [ ] The Towncrier changelog fragment is present and the documented checker and
       draft commands pass for user-visible changes; internal or test-only

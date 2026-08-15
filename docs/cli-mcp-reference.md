@@ -41,8 +41,8 @@ corroboration; they are not a correctness probability.
 The MCP server exposes one tool named `search`. Its input includes the query,
 `limit`, bare `offset`, the same structured filters, and optional `explain`.
 The response includes `results`, `count`, `limit`, `offset`, `has_more`, and
-`next_offset`. When explanation is enabled it also includes the additive
-explanation fields documented in the [design](../DESIGN/).
+`next_offset`. When explanation is enabled it also includes additive score
+semantics, retrieval-channel evidence, corroboration, and provenance fields.
 
 The MCP surface is read-only: it cannot ingest, migrate, delete, export, or
 modify source data.
