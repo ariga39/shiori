@@ -651,11 +651,11 @@ def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path:
 
     rendered = (ROOT / "llms.txt").read_text(encoding="utf-8")
     assert (
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
+        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/"
         "deployment/cloudflare-workers.md" in rendered
     )
     assert (
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/"
+        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/"
         "zh-cn/deployment/cloudflare-workers.md" in rendered
     )
 
