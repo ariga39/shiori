@@ -135,12 +135,14 @@ def test_ci_verifies_bilingual_docs_and_workers_bundle_with_locked_node_dependen
         "uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
         "node-version: '26.7.0'",
         "cache: npm",
+        "cache-dependency-path: docs-site/package-lock.json",
         "Install locked documentation dependencies",
-        "run: npm ci",
+        "run: npm --prefix docs-site ci",
         "Check documentation site and LLM index",
         'uv run python tools/docs_check.py --site-dir "${RUNNER_TEMP}/shiori-docs-site"',
         "Verify Cloudflare Workers Static Assets bundle",
-        'npm run docs:workers:dry-run -- --outdir "${RUNNER_TEMP}/shiori-workers-bundle"',
+        'npm --prefix docs-site run docs:workers:dry-run -- --outdir "${RUNNER_TEMP}/shiori-workers-bundle"',
+        "uv run python tools/release_audit.py --root . --artifact-dir docs-site/dist",
     ]
     positions = [workflow.find(literal) for literal in expected]
     assert all(position >= 0 for position in positions), positions
