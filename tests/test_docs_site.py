@@ -73,7 +73,7 @@ def test_starlight_site_builds_bilingual_homepages(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -94,7 +94,7 @@ def test_starlight_getting_started_is_bilingual(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -134,7 +134,7 @@ def test_starlight_configuration_is_bilingual(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -155,7 +155,7 @@ def test_starlight_privacy_policy_is_bilingual(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -177,63 +177,12 @@ def test_starlight_privacy_policy_is_bilingual(tmp_path: Path) -> None:
     )
 
 
-def test_starlight_contributing_is_bilingual(tmp_path: Path) -> None:
-    """The public Starlight build must render a bilingual contributing page."""
-    site_dir = tmp_path / "site"
-
-    result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    english = (site_dir / "contributing" / "index.html").read_text(encoding="utf-8")
-    chinese = (site_dir / "zh-cn" / "contributing" / "index.html").read_text(encoding="utf-8")
-    assert (
-        "Keep changes narrowly scoped, test them through public behavior, and report "
-        "what was and was not verified." in english
-    )
-    assert "保持变更范围精简，通过公开行为进行测试，并报告哪些内容已验证、哪些尚未验证。" not in english
-    assert "保持变更范围精简，通过公开行为进行测试，并报告哪些内容已验证、哪些尚未验证。" in chinese
-    assert (
-        "Keep changes narrowly scoped, test them through public behavior, and report "
-        "what was and was not verified." not in chinese
-    )
-    assert 'href="../CONFIGURATION/#test-database-isolation"' in english
-    assert 'href="../CONFIGURATION/#' in chinese
-    assert 'href="../zh-cn/' not in chinese
-    for heading, title in (
-        ("development-setup", "Development setup"),
-        ("tests", "Tests"),
-        ("documentation", "Documentation"),
-        ("pull-requests", "Pull requests"),
-        ("changelog-fragments", "Changelog fragments"),
-    ):
-        assert f'id="{heading}">{title}</h2>' in english
-    for command in (
-        "uv sync --locked --extra dev",
-        "uv run pytest -q",
-        "npm run docs:build",
-    ):
-        assert command in english
-    for literal in (
-        "changelog.d/&lt;issue&gt;.&lt;type&gt;.md",
-        "changelog.d/&lt;issue&gt;.no-changelog.md",
-        "User-visible changes require at least one changelog fragment.",
-        "Internal or test-only pull requests may instead use exactly one non-empty waiver.",
-    ):
-        assert literal in english
-
-
 def test_starlight_cli_mcp_reference_is_bilingual(tmp_path: Path) -> None:
     """The public Starlight build must render a bilingual CLI/MCP reference page."""
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -275,111 +224,12 @@ def test_starlight_cli_mcp_reference_is_bilingual(tmp_path: Path) -> None:
     assert "--offset" not in english
 
 
-def test_starlight_design_is_bilingual(tmp_path: Path) -> None:
-    """The public Starlight build must render a bilingual design page."""
-    site_dir = tmp_path / "site"
-
-    result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    english = (site_dir / "DESIGN" / "index.html").read_text(encoding="utf-8")
-    chinese = (site_dir / "zh-cn" / "DESIGN" / "index.html").read_text(encoding="utf-8")
-    assert (
-        "Shiori turns conversation history into semantically searchable memory through "
-        "an ingestion and query pipeline." in english
-    )
-    assert "Shiori 是一个将对话会话历史加工成语义可检索记忆的摄取与查询管线。" not in english
-    assert "Shiori 是一个将对话会话历史加工成语义可检索记忆的摄取与查询管线。" in chinese
-    assert (
-        "Shiori turns conversation history into semantically searchable memory through "
-        "an ingestion and query pipeline." not in chinese
-    )
-    assert (
-        "The ingestion and retrieval pipelines do not use it, while privacy lifecycle "
-        "operations still count, export, and delete legacy rows." in english
-    )
-    assert "摄取与检索管线不使用它，但隐私生命周期操作仍会统计、导出和删除 legacy 行。" not in english
-    assert "摄取与检索管线不使用它，但隐私生命周期操作仍会统计、导出和删除 legacy 行。" in chinese
-    assert (
-        "The ingestion and retrieval pipelines do not use it, while privacy lifecycle "
-        "operations still count, export, and delete legacy rows." not in chinese
-    )
-
-
-def test_starlight_atomic_rebuild_adr_is_bilingual(tmp_path: Path) -> None:
-    """The public Starlight build must render a bilingual atomic-rebuild ADR page."""
-    site_dir = tmp_path / "site"
-
-    result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    english = (site_dir / "adr" / "0001-atomic-rebuild-on-partial-embed-failure" / "index.html").read_text(
-        encoding="utf-8"
-    )
-    chinese = (site_dir / "zh-cn" / "adr" / "0001-atomic-rebuild-on-partial-embed-failure" / "index.html").read_text(
-        encoding="utf-8"
-    )
-    assert (
-        "Choose option 1: atomic full rebuild. Embeddings are prepared before deletion, "
-        "and delete plus insert remains transactional." in english
-    )
-    assert "选择方案 1：原子全量重建。嵌入在删除前准备完成，删除与插入保持事务原子性。" not in english
-    assert "选择方案 1：原子全量重建。嵌入在删除前准备完成，删除与插入保持事务原子性。" in chinese
-    assert (
-        "Choose option 1: atomic full rebuild. Embeddings are prepared before deletion, "
-        "and delete plus insert remains transactional." not in chinese
-    )
-
-
-def test_starlight_release_checklist_is_bilingual(tmp_path: Path) -> None:
-    """The public Starlight build must render a bilingual release checklist page."""
-    site_dir = tmp_path / "site"
-
-    result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    english = (site_dir / "RELEASE_CHECKLIST" / "index.html").read_text(encoding="utf-8")
-    chinese = (site_dir / "zh-cn" / "RELEASE_CHECKLIST" / "index.html").read_text(encoding="utf-8")
-    assert "This is a release-candidate checklist, not a release authorization." in english
-    assert "这是一份候选发布检查清单，不是发布授权。" not in english
-    assert "这是一份候选发布检查清单，不是发布授权。" in chinese
-    assert "This is a release-candidate checklist, not a release authorization." not in chinese
-    assert (
-        "Record the actual protected merge SHA after exact-head gates and "
-        "pair-programming review are green." in english
-    )
-    assert "在精确 head 门与结对编程 review 全绿后，记录实际受保护 merge SHA。" not in english
-    assert "在精确 head 门与结对编程 review 全绿后，记录实际受保护 merge SHA。" in chinese
-    assert (
-        "Record the actual protected merge SHA after exact-head gates and "
-        "pair-programming review are green." not in chinese
-    )
-
-
 def test_starlight_preserves_case_sensitive_stable_routes(tmp_path: Path) -> None:
     """The public Starlight build must emit the frozen case-sensitive routes."""
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -387,17 +237,10 @@ def test_starlight_preserves_case_sensitive_stable_routes(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 0, result.stderr
-    generated = {
-        path.relative_to(site_dir).as_posix()
-        for path in site_dir.rglob("index.html")
-    }
+    generated = {path.relative_to(site_dir).as_posix() for path in site_dir.rglob("index.html")}
     expected = {
         "CONFIGURATION/index.html",
-        "DESIGN/index.html",
-        "RELEASE_CHECKLIST/index.html",
         "zh-cn/CONFIGURATION/index.html",
-        "zh-cn/DESIGN/index.html",
-        "zh-cn/RELEASE_CHECKLIST/index.html",
     }
     missing = sorted(expected - generated)
     assert not missing, f"case-sensitive stable routes missing: {missing}"
@@ -408,7 +251,7 @@ def test_starlight_navigation_is_explicit_and_bilingual(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
 
     result = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -426,21 +269,17 @@ def test_starlight_navigation_is_explicit_and_bilingual(tmp_path: Path) -> None:
     en_sidebar = sidebar(english)
     zh_sidebar = sidebar(chinese)
 
-    for group in ("Start", "User guide", "Project"):
+    for group in ("Start", "User guide"):
         assert group in en_sidebar
         assert group not in zh_sidebar
-    for group in ("开始", "用户指南", "项目"):
+    for group in ("开始", "用户指南"):
         assert group in zh_sidebar
         assert group not in en_sidebar
 
-    en_groups = [g for g in ("Start", "User guide", "Project") if g in en_sidebar]
-    assert [en_sidebar.index(g) for g in en_groups] == sorted(
-        en_sidebar.index(g) for g in en_groups
-    ), en_groups
-    zh_groups = [g for g in ("开始", "用户指南", "项目") if g in zh_sidebar]
-    assert [zh_sidebar.index(g) for g in zh_groups] == sorted(
-        zh_sidebar.index(g) for g in zh_groups
-    ), zh_groups
+    en_groups = [g for g in ("Start", "User guide") if g in en_sidebar]
+    assert [en_sidebar.index(g) for g in en_groups] == sorted(en_sidebar.index(g) for g in en_groups), en_groups
+    zh_groups = [g for g in ("开始", "用户指南") if g in zh_sidebar]
+    assert [zh_sidebar.index(g) for g in zh_groups] == sorted(zh_sidebar.index(g) for g in zh_groups), zh_groups
 
     en_links = [
         "/",
@@ -448,10 +287,7 @@ def test_starlight_navigation_is_explicit_and_bilingual(tmp_path: Path) -> None:
         "/CONFIGURATION/",
         "/privacy-policy/",
         "/cli-mcp-reference/",
-        "/DESIGN/",
-        "/contributing/",
-        "/adr/0001-atomic-rebuild-on-partial-embed-failure/",
-        "/RELEASE_CHECKLIST/",
+        "/deployment/cloudflare-workers/",
     ]
     zh_links = [f"/zh-cn{link}" if link != "/" else "/zh-cn/" for link in en_links]
 
@@ -483,7 +319,7 @@ def test_starlight_llms_txt_is_bilingual_and_public(tmp_path: Path) -> None:
 
     site_dir = tmp_path / "site"
     build = subprocess.run(
-        ["npm", "run", "docs:build", "--", "--outDir", str(site_dir)],
+        ["npm", "--prefix", "docs-site", "run", "docs:build", "--", "--outDir", str(site_dir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -500,42 +336,40 @@ def test_starlight_llms_txt_is_bilingual_and_public(tmp_path: Path) -> None:
     assert "> Searchable long-term memory for AI agents." in rendered
     assert "## English" in rendered
     assert "## 简体中文" in rendered
-    assert "https://raw.githubusercontent.com/ariga39/shiori/main/docs/" not in rendered
+    raw_base = "https://raw.githubusercontent.com/ariga39/shiori/main/docs/"
+    assert "src/content/docs" not in rendered
 
     expected_urls = [
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/index.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/getting-started.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/CONFIGURATION.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/privacy-policy.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/cli-mcp-reference.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/DESIGN.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/contributing.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/adr/0001-atomic-rebuild-on-partial-embed-failure.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/RELEASE_CHECKLIST.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/index.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/getting-started.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/CONFIGURATION.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/privacy-policy.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/cli-mcp-reference.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/DESIGN.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/contributing.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/adr/0001-atomic-rebuild-on-partial-embed-failure.md",
-        "https://raw.githubusercontent.com/ariga39/shiori/main/src/content/docs/zh-cn/RELEASE_CHECKLIST.md",
+        f"{raw_base}index.md",
+        f"{raw_base}getting-started.md",
+        f"{raw_base}CONFIGURATION.md",
+        f"{raw_base}privacy-policy.md",
+        f"{raw_base}cli-mcp-reference.md",
+        f"{raw_base}deployment/cloudflare-workers.md",
+        f"{raw_base}zh-cn/index.md",
+        f"{raw_base}zh-cn/getting-started.md",
+        f"{raw_base}zh-cn/CONFIGURATION.md",
+        f"{raw_base}zh-cn/privacy-policy.md",
+        f"{raw_base}zh-cn/cli-mcp-reference.md",
+        f"{raw_base}zh-cn/deployment/cloudflare-workers.md",
     ]
     positions = [rendered.find(url) for url in expected_urls]
     assert all(position >= 0 for position in positions), positions
     assert positions == sorted(positions), positions
+    assert rendered.count(raw_base) == 12
 
 
 def test_llms_txt_rejects_navigation_without_chinese_group_translation(tmp_path: Path) -> None:
     """The public checker must fail closed when a group lacks its zh-CN label."""
     shutil.copytree(
-        ROOT / "src" / "content" / "docs",
-        tmp_path / "src" / "content" / "docs",
+        ROOT / "docs",
+        tmp_path / "docs",
     )
     (tmp_path / "pyproject.toml").write_bytes((ROOT / "pyproject.toml").read_bytes())
-    nav = json.loads((ROOT / "docs-navigation.json").read_text(encoding="utf-8"))
-    (tmp_path / "docs-navigation.json").write_text(json.dumps(nav), encoding="utf-8")
+    nav = json.loads((ROOT / "docs-site" / "docs-navigation.json").read_text(encoding="utf-8"))
+    nav_path = tmp_path / "docs-site" / "docs-navigation.json"
+    nav_path.parent.mkdir(parents=True)
+    nav_path.write_text(json.dumps(nav), encoding="utf-8")
 
     write = subprocess.run(
         [sys.executable, "tools/build_llms_txt.py", "--write", "--dir", str(tmp_path)],
@@ -548,7 +382,7 @@ def test_llms_txt_rejects_navigation_without_chinese_group_translation(tmp_path:
     assert write.returncode == 0, write.stderr
 
     nav["sidebar"][0]["translations"] = {}
-    (tmp_path / "docs-navigation.json").write_text(json.dumps(nav), encoding="utf-8")
+    nav_path.write_text(json.dumps(nav), encoding="utf-8")
 
     check = subprocess.run(
         [sys.executable, "tools/build_llms_txt.py", "--check", "--dir", str(tmp_path)],
@@ -570,6 +404,8 @@ def test_workers_dry_run_packages_bilingual_starlight_site(tmp_path: Path) -> No
     result = subprocess.run(
         [
             "npm",
+            "--prefix",
+            "docs-site",
             "run",
             "docs:workers:dry-run",
             "--",
@@ -583,13 +419,14 @@ def test_workers_dry_run_packages_bilingual_starlight_site(tmp_path: Path) -> No
     )
 
     assert result.returncode == 0, result.stderr
-    english = (ROOT / "dist" / "index.html").read_text(encoding="utf-8")
-    chinese = (ROOT / "dist" / "zh-cn" / "index.html").read_text(encoding="utf-8")
+    dist_dir = ROOT / "docs-site" / "dist"
+    english = (dist_dir / "index.html").read_text(encoding="utf-8")
+    chinese = (dist_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
     assert "Searchable long-term memory for AI agents." in english
     assert "面向 AI 智能体的可搜索长期记忆。" not in english
     assert "面向 AI 智能体的可搜索长期记忆。" in chinese
     assert "Searchable long-term memory for AI agents." not in chinese
-    assert (ROOT / "dist" / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
+    assert (dist_dir / "llms.txt").read_bytes() == (ROOT / "llms.txt").read_bytes()
     assert bundle_dir.is_dir()
     assert any(path.is_file() for path in bundle_dir.rglob("*"))
 
@@ -614,15 +451,10 @@ def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path:
     assert result.returncode == 0, result.stderr
     assert result.stdout == "docs-check: ok\n"
     assert result.stderr == ""
-    english = (site_dir / "deployment" / "cloudflare-workers" / "index.html").read_text(
-        encoding="utf-8"
-    )
-    chinese = (site_dir / "zh-cn" / "deployment" / "cloudflare-workers" / "index.html").read_text(
-        encoding="utf-8"
-    )
+    english = (site_dir / "deployment" / "cloudflare-workers" / "index.html").read_text(encoding="utf-8")
+    chinese = (site_dir / "zh-cn" / "deployment" / "cloudflare-workers" / "index.html").read_text(encoding="utf-8")
     assert (
-        "Connect the repository in Cloudflare Workers Builds, then use the pinned "
-        "repository commands below." in english
+        "Connect the repository in Cloudflare Workers Builds, then use the pinned repository commands below." in english
     )
     assert "在 Cloudflare Workers Builds 中连接此仓库，然后使用下列仓库内固定版本命令。" not in english
     assert "在 Cloudflare Workers Builds 中连接此仓库，然后使用下列仓库内固定版本命令。" in chinese
@@ -650,28 +482,14 @@ def test_cloudflare_workers_github_deployment_is_bilingual_and_indexed(tmp_path:
     assert 'href="/zh-cn/deployment/cloudflare-workers/"' in zh_homepage
 
     rendered = (ROOT / "llms.txt").read_text(encoding="utf-8")
+    assert "https://raw.githubusercontent.com/ariga39/shiori/main/docs/deployment/cloudflare-workers.md" in rendered
     assert (
-        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/"
-        "deployment/cloudflare-workers.md" in rendered
-    )
-    assert (
-        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/"
-        "zh-cn/deployment/cloudflare-workers.md" in rendered
+        "https://raw.githubusercontent.com/ariga39/shiori/main/docs/zh-cn/deployment/cloudflare-workers.md" in rendered
     )
 
 
 def test_docs_site_project_builds_from_user_docs_directory(tmp_path: Path) -> None:
-    """Public-subprocess genuine red: the independent site project must live in
-    `docs-site/` and build the bilingual site from the repository user-docs
-    directory `docs/`, keeping the Python repo root free of the Astro/npm/
-    Wrangler frontend project files.
-
-    The current main has the Astro project scattered at the repo root
-    (package.json, src/, public/, astro.config.mjs, docs-navigation.json,
-    wrangler.jsonc), so `npm --prefix docs-site run docs:build` fails closed at
-    the missing `docs-site/package.json` (ENOENT) and this node must red on the
-    first literal returncode assertion.
-    """
+    """The contained site project builds from the repository user-docs tree."""
     site_dir = tmp_path / "site"
 
     proc = subprocess.run(
@@ -704,15 +522,7 @@ def test_docs_site_project_builds_from_user_docs_directory(tmp_path: Path) -> No
 
 
 def test_user_docs_exclude_internal_project_material(tmp_path: Path) -> None:
-    """Public-subprocess genuine red: the user-facing bilingual site must NOT
-    render internal engineering material (Design, contributing, ADRs, release
-    checklist) as site routes, and those documents must live only as
-    monolingual internal files outside the user `docs/` tree.
-
-    The current head still has the internal pages in `docs/` (DESIGN.md,
-    contributing.md, adr/, RELEASE_CHECKLIST.md), so the build succeeds but the
-    first "internal route absent" assertion must fail.
-    """
+    """The bilingual user site excludes monolingual internal project material."""
     site_dir = tmp_path / "site"
 
     proc = subprocess.run(
@@ -754,6 +564,8 @@ def test_user_docs_exclude_internal_project_material(tmp_path: Path) -> None:
     en_home = (site_dir / "index.html").read_text(encoding="utf-8")
     zh_home = (site_dir / "zh-cn" / "index.html").read_text(encoding="utf-8")
     for page in (en_home, zh_home):
-        assert 'href="/deployment/cloudflare-workers/"' in page or 'href="/zh-cn/deployment/cloudflare-workers/"' in page
+        assert (
+            'href="/deployment/cloudflare-workers/"' in page or 'href="/zh-cn/deployment/cloudflare-workers/"' in page
+        )
     for label in ("Project", "项目"):
         assert label not in en_home and label not in zh_home

@@ -115,19 +115,11 @@ def test_manifest_contains_runtime_release_references() -> None:
 def test_repository_docs_reference_the_contained_site_project() -> None:
     """Contributor, maintainer, and reference docs must use the split layout."""
     contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    checklist = (ROOT / "maintainers" / "RELEASE_CHECKLIST.md").read_text(
-        encoding="utf-8"
-    )
+    checklist = (ROOT / "maintainers" / "RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
     configuration = (ROOT / "docs" / "CONFIGURATION.md").read_text(encoding="utf-8")
-    configuration_zh = (ROOT / "docs" / "zh-cn" / "CONFIGURATION.md").read_text(
-        encoding="utf-8"
-    )
-    cli_reference = (ROOT / "docs" / "cli-mcp-reference.md").read_text(
-        encoding="utf-8"
-    )
-    cli_reference_zh = (ROOT / "docs" / "zh-cn" / "cli-mcp-reference.md").read_text(
-        encoding="utf-8"
-    )
+    configuration_zh = (ROOT / "docs" / "zh-cn" / "CONFIGURATION.md").read_text(encoding="utf-8")
+    cli_reference = (ROOT / "docs" / "cli-mcp-reference.md").read_text(encoding="utf-8")
+    cli_reference_zh = (ROOT / "docs" / "zh-cn" / "cli-mcp-reference.md").read_text(encoding="utf-8")
     schema = (ROOT / "shiori" / "schema.sql").read_text(encoding="utf-8")
 
     assert "npm --prefix docs-site run docs:build" in contributing
