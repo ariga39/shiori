@@ -170,6 +170,18 @@ def get_hermes_state(conn):
     return result
 
 
+def get_max_turn_index(conn, session_id):
+    """Return the greatest Hermes message id already represented in PG."""
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT MAX(turn_index_end) FROM session_chunks WHERE session_id = %s",
+        (session_id,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    return row[0] if row and row[0] is not None else 0
+
+
 def mark_hermes_processed(conn, filepath, mtime, message_count, rewind_count,
                           source_type, chunks_created, partial=False):
     """Mark a Hermes session processed, encoding rewind_count into processed_offset."""
@@ -244,7 +256,14 @@ def main(argv=None):
         for s in sessions:
             key = "hermes://" + s["session_id"]
             prev = processed.get(key)
-            mtime = datetime.fromtimestamp(s["last_activity_at"], tz=UTC)
+            activity_at = s["last_activity_at"]
+            if activity_at is None:
+                activity_at = s["started_at"]
+                if activity_at is None:
+                    log.warning("%s: no last_activity_at or started_at, skipping", s["session_id"])
+                    continue
+                log.warning("%s: last_activity_at is NULL, using started_at", s["session_id"])
+            mtime = datetime.fromtimestamp(activity_at, tz=UTC)
             size = s["message_count"]
             unchanged = prev and prev["mtime"] == mtime and prev["size"] == size
             # rewind detection: Hermes rewind flips rows to active=0 and bumps
@@ -269,6 +288,7 @@ def main(argv=None):
                          s["has_rewound"])
             s["key"] = key
             s["mtime_dt"] = mtime
+            s["full_reprocess"] = args.force or prev is None or not rewind_unchanged
             to_process.append(s)
 
         log.info("Found %d sessions, %d already processed, %d to process",
@@ -286,20 +306,28 @@ def main(argv=None):
         for s in to_process:
             try:
                 messages = load_messages(db, s["session_id"])
+                if not s["full_reprocess"]:
+                    assert conn is not None
+                    max_turn_index = get_max_turn_index(conn, s["session_id"])
+                    messages = [m for m in messages if m["_line_no"] > max_turn_index]
+                    log.info(
+                        "%s: appending turns after %d (%d new messages)",
+                        s["session_id"], max_turn_index, len(messages),
+                    )
                 if not messages:
                     log.info("%s: no user/assistant messages", s["session_id"])
                     if not args.dry_run:
                         assert conn is not None
-                        # A rewound session may have zero remaining active rows;
-                        # any previously-ingested chunks must be purged so the
-                        # undone content stops being searchable in PG.
-                        cur = conn.cursor()
-                        cur.execute(
-                            "DELETE FROM session_chunks WHERE session_id = %s",
-                            (s["session_id"],),
-                        )
-                        conn.commit()
-                        cur.close()
+                        if s["full_reprocess"]:
+                            # A rewound session may have zero remaining active
+                            # rows; purge content removed by the rewind.
+                            cur = conn.cursor()
+                            cur.execute(
+                                "DELETE FROM session_chunks WHERE session_id = %s",
+                                (s["session_id"],),
+                            )
+                            conn.commit()
+                            cur.close()
                         mark_hermes_processed(
                             conn, s["key"], s["mtime_dt"], s["message_count"],
                             s["rewind_count"], s["source_type"], 0
@@ -312,15 +340,14 @@ def main(argv=None):
                     log.info("%s: %d msgs → 0 chunks (all too short)", s["session_id"], len(messages))
                     if not args.dry_run:
                         assert conn is not None
-                        # Same purge: if nothing chunkable remains, PG must not
-                        # keep serving the session's old chunks.
-                        cur = conn.cursor()
-                        cur.execute(
-                            "DELETE FROM session_chunks WHERE session_id = %s",
-                            (s["session_id"],),
-                        )
-                        conn.commit()
-                        cur.close()
+                        if s["full_reprocess"]:
+                            cur = conn.cursor()
+                            cur.execute(
+                                "DELETE FROM session_chunks WHERE session_id = %s",
+                                (s["session_id"],),
+                            )
+                            conn.commit()
+                            cur.close()
                         mark_hermes_processed(
                             conn, s["key"], s["mtime_dt"], s["message_count"],
                             s["rewind_count"], s["source_type"], 0
@@ -338,7 +365,8 @@ def main(argv=None):
                 embeddings, failed_indices = ingest.embed_texts_with_retry(texts)
 
                 stored, insert_failed = ingest.store_chunks(
-                    chunks, embeddings, failed_indices, conn, fallback_ts=s["started_at"]
+                    chunks, embeddings, failed_indices, conn,
+                    fallback_ts=s["started_at"], replace=s["full_reprocess"],
                 )
 
                 partial = (stored == 0 and len(chunks) > 0) or len(failed_indices) > 0 or insert_failed > 0
