@@ -1,6 +1,6 @@
 # Third-party notices
 
-Shiyi is MIT-licensed under `LICENSE`. That license does not replace or
+shiori is MIT-licensed under `LICENSE`. That license does not replace or
 relicense the terms of dependencies. The direct dependencies locked by
 `uv.lock` are listed below; their own distributions remain authoritative for
 full notices and bundled-code terms.
