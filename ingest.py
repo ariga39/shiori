@@ -450,7 +450,13 @@ def parse_timestamp(ts):
 
 
 # ── Storage ──────────────────────────────────────────────────────────────────
-def store_chunks(chunks, embeddings, failed_indices, conn, fallback_ts=None):
+def store_chunks(chunks, embeddings, failed_indices, conn, fallback_ts=None, replace=True):
+    """Store an atomic batch of chunks.
+
+    ``replace`` preserves the historical whole-session rebuild behavior by
+    default. Incremental sources may set it to ``False`` to append chunks
+    without deleting turns that were stored by an earlier run.
+    """
     if not chunks:
         return 0, 0
 
@@ -471,12 +477,13 @@ def store_chunks(chunks, embeddings, failed_indices, conn, fallback_ts=None):
         cur.close()
         return 0, 0
 
-    session_ids = list({c["session_id"] for c in chunks})
-    for sid in session_ids:
-        cur.execute("DELETE FROM session_chunks WHERE session_id = %s", (sid,))
-        deleted = cur.rowcount
-        if deleted:
-            log.info("Deleted %d old chunks for session %s", deleted, sid)
+    if replace:
+        session_ids = list({c["session_id"] for c in chunks})
+        for sid in session_ids:
+            cur.execute("DELETE FROM session_chunks WHERE session_id = %s", (sid,))
+            deleted = cur.rowcount
+            if deleted:
+                log.info("Deleted %d old chunks for session %s", deleted, sid)
 
     for idx, (chunk, emb) in enumerate(zip(chunks, embeddings)):
         if emb is None:  # defensive; unreachable given the guard above

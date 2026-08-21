@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import time
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -119,6 +120,17 @@ def add_session(conn, sid, source="discord", title="t", message_count=0,
          last_activity_at - 100, last_activity_at),
     )
     conn.commit()
+
+
+def add_session_with_null_activity(conn, sid, source="discord", title="t"):
+    started_at = time.time() - 100
+    conn.execute(
+        "INSERT INTO sessions (id, source, title, chat_id, message_count,"
+        " started_at, last_activity_at) VALUES (?,?,?,?,?,?,NULL)",
+        (sid, source, title, "test-chat", 0, started_at),
+    )
+    conn.commit()
+    return started_at
 
 
 def add_message(conn, sid, role, content, active=1, compacted=0, ts=None):
@@ -245,8 +257,25 @@ class TestListSessions:
         assert by_id[sid]["has_rewound"] is False, \
             "compaction rows must not be mistaken for rewind"
 
+    def test_null_last_activity_is_retained_for_tolerant_processing(self, hermes_db):
+        sid = "sess-" + uuid.uuid4().hex
+        started_at = add_session_with_null_activity(hermes_db, sid)
+
+        session = {s["session_id"]: s for s in ingest_hermes.list_sessions(hermes_db)}[sid]
+
+        assert session["last_activity_at"] is None
+        assert session["started_at"] == started_at
+
 
 class TestIncrementalCursor:
+    def test_null_last_activity_dry_run_does_not_crash(self, hermes_db, tmp_path, monkeypatch):
+        sid = "sess-" + uuid.uuid4().hex
+        add_session_with_null_activity(hermes_db, sid)
+        add_message(hermes_db, sid, "user", "message with enough text to ingest safely")
+        monkeypatch.setenv("SHIORI_HERMES_DB", str(tmp_path / "state.db"))
+
+        ingest_hermes.main(["--dry-run", "--session", sid])
+
     def test_unchanged_sessions_skipped(self, hermes_db, tmp_path, monkeypatch):
         """Sessions whose mtime/message_count are unchanged must not reprocess."""
         # Point ingest_hermes at our temp db
@@ -367,6 +396,99 @@ class TestChunkCompatibility:
         assert len(chunks) >= 1
         assert all(c["session_id"] == sid for c in chunks)
         assert all(c["source_type"] == "discord" for c in chunks)
+
+
+class TestMessageLevelIncremental:
+    def test_grown_session_embeds_only_new_messages_and_appends(
+        self, hermes_db, tmp_path, monkeypatch,
+    ):
+        sid = "sess-" + uuid.uuid4().hex
+        last = time.time()
+        add_session(hermes_db, sid, message_count=4, last_activity_at=last)
+        old_ids = [
+            add_message(hermes_db, sid, "user", "old question " + "word " * 20),
+            add_message(hermes_db, sid, "assistant", "old answer " + "word " * 20),
+        ]
+        new_ids = [
+            add_message(hermes_db, sid, "user", "new question " + "word " * 20),
+            add_message(hermes_db, sid, "assistant", "new answer " + "word " * 20),
+        ]
+        monkeypatch.setenv("SHIORI_HERMES_DB", str(tmp_path / "state.db"))
+
+        class FakeCursor:
+            def execute(self, *_args, **_kwargs):
+                pass
+
+            def fetchone(self):
+                return (True,)
+
+            def close(self):
+                pass
+
+        class FakeConnection:
+            def cursor(self):
+                return FakeCursor()
+
+            def rollback(self):
+                pass
+
+            def close(self):
+                pass
+
+        fake_conn = FakeConnection()
+        previous = datetime.fromtimestamp(last - 1, tz=UTC)
+        monkeypatch.setattr(ingest, "get_db", lambda: fake_conn)
+        monkeypatch.setattr(
+            ingest_hermes,
+            "get_hermes_state",
+            lambda _conn: {"hermes://" + sid: {"mtime": previous, "size": 2, "rewind": 0}},
+        )
+        monkeypatch.setattr(ingest_hermes, "get_max_turn_index", lambda _conn, _sid: max(old_ids))
+
+        embedded_texts = []
+        monkeypatch.setattr(
+            ingest,
+            "embed_texts_with_retry",
+            lambda texts: (embedded_texts.extend(texts) or [[0.01]] * len(texts), []),
+        )
+        store_calls = []
+
+        def fake_store(chunks, embeddings, failed_indices, conn, **kwargs):
+            store_calls.append((chunks, kwargs))
+            return len(chunks), 0
+
+        monkeypatch.setattr(ingest, "store_chunks", fake_store)
+        monkeypatch.setattr(ingest_hermes, "mark_hermes_processed", lambda *_args, **_kwargs: None)
+
+        ingest_hermes.main(["--session", sid])
+
+        assert embedded_texts
+        assert "old question" not in " ".join(embedded_texts)
+        assert "new question" in " ".join(embedded_texts)
+        chunks, kwargs = store_calls[0]
+        assert kwargs["replace"] is False
+        assert all(chunk["turn_index_start"] >= min(new_ids) for chunk in chunks)
+
+    def test_loads_and_chunks_only_turns_after_stored_max(self, hermes_db):
+        sid = "sess-" + uuid.uuid4().hex
+        add_session(hermes_db, sid, message_count=4)
+        old_ids = [
+            add_message(hermes_db, sid, "user", "old question " + "word " * 20),
+            add_message(hermes_db, sid, "assistant", "old answer " + "word " * 20),
+        ]
+        new_ids = [
+            add_message(hermes_db, sid, "user", "new question " + "word " * 20),
+            add_message(hermes_db, sid, "assistant", "new answer " + "word " * 20),
+        ]
+
+        messages = ingest_hermes.load_messages(hermes_db, sid)
+        messages = [message for message in messages if message["_line_no"] > max(old_ids)]
+        chunks = ingest.chunk_messages(messages, sid, "discord")
+
+        assert [message["_line_no"] for message in messages] == new_ids
+        assert chunks
+        assert all(chunk["turn_index_start"] > max(old_ids) for chunk in chunks)
+        assert "old question" not in " ".join(chunk["content"] for chunk in chunks)
 
 
 class TestEmptySessionPurge:

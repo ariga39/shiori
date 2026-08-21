@@ -101,6 +101,28 @@ def test_success_full_replace(db, emb):
     assert count_chunks(conn, sid) == 3
 
 
+def test_success_incremental_append_preserves_existing(db, emb):
+    conn, sid = db
+    stored, failed = ingest.store_chunks(
+        [make_chunk(1, sid, "old turn")], [emb], [], conn,
+    )
+    assert (stored, failed) == (1, 0)
+
+    stored, failed = ingest.store_chunks(
+        [make_chunk(2, sid, "new turn")], [emb], [], conn, replace=False,
+    )
+
+    assert (stored, failed) == (1, 0)
+    assert count_chunks(conn, sid) == 2
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT content FROM session_chunks WHERE session_id = %s ORDER BY turn_index_start",
+        (sid,),
+    )
+    assert [row[0] for row in cur.fetchall()] == ["old turn", "new turn"]
+    cur.close()
+
+
 def test_insert_failure_rolls_back_whole_batch(db, emb, wrong_emb):
     conn, sid = db
     stored, failed = ingest.store_chunks(
