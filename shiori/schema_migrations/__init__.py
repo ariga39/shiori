@@ -64,8 +64,7 @@ def migrated_db_summary(conn) -> dict[str, object]:
     """Read the migrated database into the same comparable structure.
 
     Only the three business tables are compared; migration bookkeeping tables
-    (``shiori_schema_migrations`` and its legacy ``shiyi_schema_migrations``
-    predecessor) and test guards are excluded.
+    (the ``shiori_schema_migrations`` ledger) and test guards are excluded.
     """
     business = {"session_chunks", "ingestion_state", "session_facts"}
     tables: dict[str, list[str]] = {}

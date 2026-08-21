@@ -7,11 +7,6 @@ Configuration precedence is deliberately boring and observable:
 3. an explicitly selected JSON/TOML config file;
 4. safe non-secret defaults (chunking and retry limits only).
 
-Legacy ``SHIYI_*`` environment variables and ``[shiyi]`` config sections are
-accepted as compatible inputs for one migration cycle.  Setting both a
-canonical ``SHIORI_*``/``[shiori]`` value and its legacy alias for the same
-field fails closed; it is never silently resolved.
-
 Data-source paths, database credentials, and embedding provider settings have
 no implicit OpenClaw/Hermes/Discord defaults.  The old paths are available
 only through the explicit ``legacy_openclaw`` migration switch.
@@ -68,7 +63,7 @@ def _positive_int(value: Any, name: str) -> int:
     return result
 
 
-def _read_config_file(path: Path) -> tuple[dict[str, Any], bool]:
+def _read_config_file(path: Path) -> dict[str, Any]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -84,25 +79,10 @@ def _read_config_file(path: Path) -> tuple[dict[str, Any], bool]:
 
     if not isinstance(data, dict):
         raise ConfigError("config file root must be an object", code="invalid_config_file")
-    has_canonical = isinstance(data.get("shiori"), dict)
-    has_legacy = isinstance(data.get("shiyi"), dict)
-    if has_canonical and has_legacy:
-        raise ConfigError(
-            "config file must not define both [shiori] and [shiyi] sections",
-            code="config_section_conflict",
-        )
-    if has_canonical:
-        section = data["shiori"]
-        legacy = False
-    elif has_legacy:
-        section = data["shiyi"]
-        legacy = True
-    else:
-        section = data
-        legacy = False
+    section = data["shiori"] if isinstance(data.get("shiori"), dict) else data
     if not isinstance(section, dict):
         raise ConfigError("[shiori] config section must be an object", code="invalid_config_file")
-    return dict(section), legacy
+    return dict(section)
 
 
 def _key_value_file(path: Path) -> dict[str, str]:
@@ -318,7 +298,7 @@ class Settings:
                     code="embedding_not_configured",
                 )
             assert self.voyage_model is not None
-            if not (self.voyage_model.startswith("shiori-fake-") or self.voyage_model.startswith("shiyi-fake-")):
+            if not self.voyage_model.startswith("shiori-fake-"):
                 raise ConfigError(
                     "fake embeddings require a model name in the reserved shiori-fake-* namespace",
                     code="fake_embedding_model_reserved",
@@ -343,7 +323,7 @@ class Settings:
                 code="embedding_not_configured",
             )
         assert self.voyage_model is not None
-        if self.voyage_model.startswith("shiyi-fake-") or self.voyage_model.startswith("shiori-fake-"):
+        if self.voyage_model.startswith(("shiori-fake-", "shiyi-fake-")):
             raise ConfigError(
                 "the shiori-fake-* model namespace is reserved for deterministic local vectors",
                 code="fake_embedding_model_reserved",
@@ -431,36 +411,6 @@ _ENV_FIELDS: dict[str, tuple[str, ...]] = {
     "discord_lock_id": ("SHIORI_DISCORD_LOCK_ID",),
 }
 
-# Legacy aliases for one migration cycle.  Each field maps to the legacy
-# ``SHIYI_*`` variable that used to be canonical.  If both a canonical
-# ``SHIORI_*`` variable and its legacy alias are set for the same field,
-# configuration fails closed instead of guessing which one wins.
-_LEGACY_ENV_FIELDS: dict[str, tuple[str, ...]] = {
-    "sessions_dir": ("SHIYI_SESSIONS_DIR",),
-    "hermes_db": ("SHIYI_HERMES_DB",),
-    "discord_archive_dir": ("SHIYI_DISCORD_ARCHIVE_DIR",),
-    "database_dsn": ("SHIYI_DATABASE_DSN", "SHIYI_DATABASE_URL", "SHIYI_PG_DSN"),
-    "pg_cred_file": ("SHIYI_PG_CRED", "SHIYI_PG_CRED_FILE"),
-    "embedding_provider": ("SHIYI_EMBEDDING_PROVIDER",),
-    "voyage_api_url": ("SHIYI_VOYAGE_API_URL",),
-    "voyage_api_key": ("SHIYI_VOYAGE_API_KEY", "SHIYI_VOYAGE_KEY"),
-    "voyage_key_file": ("SHIYI_VOYAGE_KEY_FILE",),
-    "voyage_model": ("SHIYI_VOYAGE_MODEL",),
-    "replay_manifest": ("SHIYI_REPLAY_MANIFEST",),
-    "embed_dim": ("SHIYI_EMBED_DIM",),
-    "allow_fake_embeddings": ("SHIYI_ALLOW_FAKE_EMBEDDINGS",),
-    "environment": ("SHIYI_ENVIRONMENT",),
-    "log_file": ("SHIYI_LOG_FILE",),
-    "chunk_tokens": ("SHIYI_CHUNK_TOKENS",),
-    "chunk_overlap": ("SHIYI_CHUNK_OVERLAP",),
-    "voyage_batch_size": ("SHIYI_VOYAGE_BATCH_SIZE",),
-    "voyage_rps_limit": ("SHIYI_VOYAGE_RPS_LIMIT",),
-    "embed_timeout": ("SHIYI_EMBED_TIMEOUT",),
-    "max_retries": ("SHIYI_MAX_RETRIES",),
-    "sessions_lock_id": ("SHIYI_SESSIONS_LOCK_ID",),
-    "discord_lock_id": ("SHIYI_DISCORD_LOCK_ID",),
-}
-
 
 _PATH_FIELDS = {"sessions_dir", "hermes_db", "discord_archive_dir", "pg_cred_file", "voyage_key_file", "replay_manifest", "log_file"}
 _INT_FIELDS = {
@@ -524,60 +474,19 @@ def load_config(
 ) -> Settings:
     """Load settings with explicit values taking precedence over env/file."""
     env = dict(os.environ if environ is None else environ)
-    canonical_config_file = env.get("SHIORI_CONFIG_FILE", "")
-    legacy_config_file = env.get("SHIYI_CONFIG_FILE", "")
     if config_path is None:
-        if canonical_config_file and legacy_config_file:
-            raise ConfigError(
-                "both SHIORI_CONFIG_FILE and SHIYI_CONFIG_FILE are set",
-                code="config_file_conflict",
-            )
-        selected_path = canonical_config_file or legacy_config_file
+        selected_path = env.get("SHIORI_CONFIG_FILE", "")
     else:
         selected_path = config_path
     values: dict[str, Any] = {}
-    file_is_legacy = False
-    file_values: dict[str, Any] = {}
     if selected_path:
-        file_values, file_is_legacy = _read_config_file(Path(selected_path).expanduser())
-        values.update(file_values)
+        values.update(_read_config_file(Path(selected_path).expanduser()))
 
-    # Canonical ``SHIORI_*`` environment variables.  If the selected config
-    # file already set the same field through the legacy ``[shiyi]`` section,
-    # canonical env must not silently win: old and new coexisting for one field
-    # fails closed.
-    canonical_env_fields: set[str] = set()
     for field_name, env_names in _ENV_FIELDS.items():
         for env_name in env_names:
             if env_name in env and env[env_name] != "":
-                if file_is_legacy and field_name in file_values:
-                    raise ConfigError(
-                        f"legacy [shiyi] config sets {field_name} together with {env_name}",
-                        code="config_source_conflict",
-                    )
                 values[field_name] = env[env_name]
-                canonical_env_fields.add(field_name)
                 break
-
-    # Legacy ``SHIYI_*`` variables are accepted as compatible inputs for one
-    # migration cycle.  A field set through both a canonical ``SHIORI_*`` name
-    # and its legacy alias fails closed; the two are never merged or guessed.
-    # A legacy file section together with a legacy ``SHIYI_*`` variable for the
-    # same field stays compatible (both are old inputs); only canonical + legacy
-    # mixes fail.
-    for field_name, legacy_names in _LEGACY_ENV_FIELDS.items():
-        legacy_value = next(
-            (env[legacy_name] for legacy_name in legacy_names if env.get(legacy_name, "") != ""),
-            None,
-        )
-        if legacy_value is None:
-            continue
-        if field_name in canonical_env_fields or (field_name in values and not file_is_legacy):
-            raise ConfigError(
-                f"both {_ENV_FIELDS[field_name][0]} and a legacy SHIYI_* alias are set",
-                code="env_alias_conflict",
-            )
-        values[field_name] = legacy_value
 
     # Explicit keyword values are the highest-priority layer.  This also lets
     # tests inject values without mutating process-global environment state.

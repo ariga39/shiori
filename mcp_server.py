@@ -202,7 +202,7 @@ async def _search_tool(
     )
 
 
-class ShiyiMCPServer(FastMCP):
+class ShioriMCPServer(FastMCP):
     """FastMCP server with the pre-1.0 call result compatibility shape."""
 
     async def call_tool(self, name: str, arguments: dict) -> CallToolResult:
@@ -212,8 +212,8 @@ class ShiyiMCPServer(FastMCP):
         return CallToolResult(content=cast(list[ContentBlock], list(result)))
 
 
-def build_server() -> ShiyiMCPServer:
-    server = ShiyiMCPServer(
+def build_server() -> ShioriMCPServer:
+    server = ShioriMCPServer(
         name="session-memory",
         instructions=(
             "Provides the `search` tool for retrieving relevant session memory "
