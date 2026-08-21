@@ -414,6 +414,25 @@ def test_fake_embedding_model_namespace_cannot_cross_provider_boundary():
         raise AssertionError("production queries must reject the fake model namespace")
 
 
+def test_legacy_shiyi_fake_namespace_is_still_rejected_as_real_model():
+    """The retired shiyi-fake-* namespace must never validate as a real
+    Voyage model; it stays reserved so legacy names fail closed."""
+    production = load_config(
+        environ={
+            "SHIORI_EMBEDDING_PROVIDER": "voyage",
+            "SHIORI_VOYAGE_API_KEY": "synthetic-not-a-key",
+            "SHIORI_VOYAGE_MODEL": "shiyi-fake-v1",
+            "SHIORI_EMBED_DIM": "1024",
+        }
+    )
+    try:
+        production.require_embedding()
+    except ConfigError as exc:
+        assert exc.code == "fake_embedding_model_reserved"
+    else:
+        raise AssertionError("production queries must reject the legacy fake model namespace")
+
+
 def test_fake_embedding_contract_is_shared_by_ingest_and_query(monkeypatch):
     settings = load_config(
         environ={

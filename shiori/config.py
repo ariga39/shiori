@@ -323,7 +323,7 @@ class Settings:
                 code="embedding_not_configured",
             )
         assert self.voyage_model is not None
-        if self.voyage_model.startswith("shiori-fake-"):
+        if self.voyage_model.startswith(("shiori-fake-", "shiyi-fake-")):
             raise ConfigError(
                 "the shiori-fake-* model namespace is reserved for deterministic local vectors",
                 code="fake_embedding_model_reserved",
