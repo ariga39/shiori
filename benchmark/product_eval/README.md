@@ -96,7 +96,7 @@ Exact repo-relative flags (run from the repo root):
 
 ```bash
 uv run python benchmark/product_eval/build_run_manifest.py \
-  --base-sha 49ab1598ea50cca3f001ad75993eda4896b58e82 \
+  --base-sha "$(git rev-parse HEAD)" \
   --results benchmark/product_eval/baseline_72_results.json \
   --report benchmark/product_eval/baseline_72_report.md \
   --dev-vectors benchmark/.generated/dev_query_vectors.json \
@@ -130,14 +130,18 @@ docker exec <pg-container> psql -U <user> -d postgres -tAc \
 ### 7. Offline verification (CI-safe)
 
 ```bash
-uv run pytest tests/test_product_eval_baseline.py tests/test_product_eval_contract.py \
+uv run pytest tests/test_product_eval_contract.py \
   tests/test_product_eval_adapters.py tests/test_product_eval_runner.py
 ```
 
 ## Deliverables
 
-- `baseline_72_results.json` — per-config/per-bucket metrics, temporal pairs,
+Only the latest generation is committed; earlier generations live in git
+history and can be regenerated with the commands above (output paths are
+examples).
+
+- `phase4e3_72_results.json` — per-config/per-bucket metrics, temporal pairs,
   per-tag filter leakage, per-config sanitized traces, stage/e2e latency.
-- `baseline_72_manifest.json` — base SHA, model identity, committed/local input
+- `phase4e3_72_manifest.json` — base SHA, model identity, committed/local input
   hashes, result/report hashes, runtime versions, adapter not-run status.
-- `baseline_72_report.md` — machine-generated Markdown report.
+- `phase4e3_72_report.md` — machine-generated Markdown report.

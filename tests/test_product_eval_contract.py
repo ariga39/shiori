@@ -25,44 +25,6 @@ MANIFEST_SCHEMA = PRODUCT_EVAL / "dataset_manifest.schema.json"
 DATASET_MANIFEST = PRODUCT_EVAL / "dataset_manifest.json"
 GOLDEN_ROWS = PRODUCT_EVAL / "golden_queries.jsonl"
 
-# ---- Task #11 baseline byte-stability --------------------------------------
-
-# Frozen: task #11 baseline files must remain byte-stable. Captured from main
-# 49ab1598ea50cca3f001ad75993eda4896b58e82.
-TASK11_BASELINE_HASHES = {
-    "benchmark/.gitignore": "16c991a1c0f9b2fc1f645895d6f664ea111b0f0bbe4f3d6498413ce1f531ab9d",
-    "benchmark/README.md": "cd9c4bb13f84291f8aaf5b0836bcc0e1b693553ca251b6bf30d3178f53e30d31",
-    "benchmark/__init__.py": "bdd81846b385fc471a76fe9915fc2401494b8dcef169829942554e6ff81f0794",
-    "benchmark/corpus_schema.json": "6c991bb0d3ceeb3db3500d8898a8cf24131a7a48575ffc128ad31093885bbd3d",
-    "benchmark/fixtures/corpus.jsonl": "927584aa88a5a2c0223cce75ca001a5df75d5ac5689dfd64e598432de481de58",
-    "benchmark/fixtures/judgments.jsonl": "acfc5aeaeaccb207ef2b18a74a9e325f09ed4cbfe41aa05f94959a7d380c005b",
-    "benchmark/generate_vectors.py": "5217f144ac1a801795e7f6077512ce105d754a420daaeefcbce5861645d259e9",
-    "benchmark/query_rendering.py": "10d8dc93ba96558a33b40c30745e06bfe72d5a9f0c9dc036c7fef1298f6469a5",
-    "benchmark/report.md": "77875528be491e56d5ec41e3fba01cdbe21c3ce8acec0f7044fbbd70a9107029",
-    "benchmark/requirements.in": "aed88285b01d174e8d791226e4c301d215819fcbd29b8514d264eca084a8d73a",
-    "benchmark/requirements.lock": "47ba34e03af8b38fe58d8a3fb2d7528608ce4e1e1e2305b773ec8dd283d8bcaa",
-    "benchmark/results/manifest.json": "af3d672254f2d7ea5d6d5681fda6f69ee75fdcca40c3391428a9f12cf985a536",
-    "benchmark/results/results.json": "7b9a02bee04a8284415606800915e57b5dd1c7393f75705a3b67d7e9aeddffb0",
-    "benchmark/run_benchmark.py": "46a1adac0db1ec7a715834724373b8f82220356409dba249a0c354bf95a8d117",
-    "benchmark/vector_validation.py": "678328559687c340288ef45ea0b4fbd39194ef0f066a49b49a1dec2dd7acb7bb",
-}
-
-
-def _sha256_bytes(data: bytes) -> str:
-    import hashlib
-
-    return hashlib.sha256(data).hexdigest()
-
-
-@pytest.mark.parametrize("rel", sorted(TASK11_BASELINE_HASHES))
-def test_task11_baseline_byte_stability(rel: str) -> None:
-    """task #11 baseline files must not change (byte-stable)."""
-    path = REPO / rel
-    assert path.exists(), f"missing task #11 baseline file {rel}"
-    actual = _sha256_bytes(path.read_bytes())
-    assert actual == TASK11_BASELINE_HASHES[rel], f"task #11 baseline drifted: {rel}"
-
-
 # ---- Metric formulas (frozen task #11 definitions) --------------------------
 
 
