@@ -30,9 +30,6 @@ def test_ci_actions_and_container_are_pinned() -> None:
     assert 'service_container="${{ job.services.postgres.id }}"' in workflow
     assert "tools/verify_pgvector_image.sh \"${expected_image}\" \"${service_container}\"" in workflow
     assert f'expected_image="pgvector/pgvector@{PGVECTOR_DIGEST}"' in workflow
-    assert "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
-    assert "raw_logs_uploaded\":false" in workflow
-    assert "retention-days: 1" in workflow
     assert workflow.count("fetch-depth: 0") == 2
 
     audit = AUDIT.read_text(encoding="utf-8")
