@@ -253,26 +253,6 @@ jobs:
         shell: bash
         run: uv run python tools/release_audit.py --root . --artifact-dir docs-site/dist
 
-      - name: Prepare redacted failure evidence
-        if: ${{ failure() }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          evidence_dir="${RUNNER_TEMP}/shiori-failure-evidence"
-          mkdir -p "${evidence_dir}"
-          cat > "${evidence_dir}/summary.json" <<'JSON'
-          {"status":"failed","raw_logs_uploaded":false,"secret_matches":"counts_only","retention_days":1}
-          JSON
-
-      - name: Upload redacted failure evidence
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: shiori-failure-evidence-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/shiori-failure-evidence
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Drop isolated database
         if: always()
         shell: bash
