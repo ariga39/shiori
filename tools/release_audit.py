@@ -14,6 +14,7 @@ import hashlib
 import json
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -76,10 +77,6 @@ def _is_documented_example(
     if source == "reachable_blob" and (
         (path == "tests/test_release_audit.py" and category in {"private_key", "credential_assignment"})
         or (path == "tools/release_audit.py" and category == "host_path")
-        # The Phase 4E1 measurement-sanitization test asserts the generated
-        # report contains no host paths; its regex literal is a documented
-        # fixture, not a real path.  Path-exact so no other file can opt out.
-        or (path == "tests/test_filter_eval.py" and category == "host_path")
     ):
         return True
     if category == "email_in_blob":
@@ -97,6 +94,12 @@ def _is_documented_example(
         return path.startswith("tests/") and bool(re.fullmatch(r"(?:sk|pk|rk)_live_[0-9a-f]{16}", match))
     if category == "host_path":
         if match.startswith(("~/.openclaw", "~/.hermes", "/home/raft", "/home/alice", "/home/u")):
+            return True
+        # Detection-regex fragments from policing tests deleted from HEAD
+        # survive immutably in reachable history. The '|' separators mean the
+        # shape can never be a real host path; keep the allowance match-exact
+        # so no other content opts out.
+        if source == "reachable_blob" and match == r"/Users/|/private/|\.pem":
             return True
         # The clean-machine harness deliberately places XDG state below a
         # variable-owned temporary directory.  The regex sees only the
@@ -156,9 +159,21 @@ def _read_objects(root: Path, object_ids: list[str]) -> list[tuple[str, str, byt
     )
     assert process.stdin is not None
     assert process.stdout is not None
-    for object_id in object_ids:
-        process.stdin.write(f"{object_id}\n".encode("ascii"))
-    process.stdin.close()
+
+    # Feed the object ids from a background thread: writing every id before
+    # reading any output deadlocks once the OS pipe buffers fill (git blocks
+    # writing blob bodies while we block writing ids).
+    def _feed() -> None:
+        assert process.stdin is not None
+        try:
+            for oid in object_ids:
+                process.stdin.write(f"{oid}\n".encode("ascii"))
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+
+    feeder = threading.Thread(target=_feed, daemon=True)
+    feeder.start()
 
     result: list[tuple[str, str, bytes]] = []
     for object_id in object_ids:
@@ -170,6 +185,7 @@ def _read_objects(root: Path, object_ids: list[str]) -> list[tuple[str, str, byt
         process.stdout.read(1)  # cat-file's record separator
         result.append((object_id, object_type, body))
     return_code = process.wait()
+    feeder.join()
     if return_code != 0:
         raise RuntimeError("git object scan failed")
     return result
