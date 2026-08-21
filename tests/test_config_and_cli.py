@@ -414,6 +414,25 @@ def test_fake_embedding_model_namespace_cannot_cross_provider_boundary():
         raise AssertionError("production queries must reject the fake model namespace")
 
 
+def test_legacy_shiyi_fake_namespace_is_still_rejected_as_real_model():
+    """The retired shiyi-fake-* namespace must never validate as a real
+    Voyage model; it stays reserved so legacy names fail closed."""
+    production = load_config(
+        environ={
+            "SHIORI_EMBEDDING_PROVIDER": "voyage",
+            "SHIORI_VOYAGE_API_KEY": "synthetic-not-a-key",
+            "SHIORI_VOYAGE_MODEL": "shiyi-fake-v1",
+            "SHIORI_EMBED_DIM": "1024",
+        }
+    )
+    try:
+        production.require_embedding()
+    except ConfigError as exc:
+        assert exc.code == "fake_embedding_model_reserved"
+    else:
+        raise AssertionError("production queries must reject the legacy fake model namespace")
+
+
 def test_fake_embedding_contract_is_shared_by_ingest_and_query(monkeypatch):
     settings = load_config(
         environ={
@@ -460,143 +479,3 @@ def test_cli_dry_run_requires_explicit_source_but_not_database(tmp_path: Path):
     archive_file = tmp_path / "channel.jsonl"
     archive_file.write_text("", encoding="utf-8")
     assert main(["ingest", "--source", "discord", "--file", str(archive_file), "--dry-run"]) == 0
-
-
-# --- legacy shiyi -> shiori rename compatibility (Phase 4A) ---
-
-
-def test_legacy_shiyi_env_vars_are_accepted_as_compatible_input():
-    settings = load_config(environ={"SHIYI_SESSIONS_DIR": "/srv/legacy/sessions"})
-
-    assert settings.sessions_dir == Path("/srv/legacy/sessions")
-
-
-def test_legacy_shiyi_env_alias_uses_canonical_when_only_legacy_is_set():
-    settings = load_config(
-        environ={
-            "SHIYI_DATABASE_DSN": "postgresql://legacy@example.test/db",
-            "SHIYI_PG_CRED": "/srv/legacy/pg.env",
-        }
-    )
-
-    assert settings.database_dsn == "postgresql://legacy@example.test/db"
-    assert settings.pg_cred_file == Path("/srv/legacy/pg.env")
-
-
-def test_canonical_and_legacy_env_conflict_fails_closed():
-    with pytest.raises(ConfigError) as exc:
-        load_config(
-            environ={
-                "SHIORI_SESSIONS_DIR": "/srv/shiori/sessions",
-                "SHIYI_SESSIONS_DIR": "/srv/legacy/sessions",
-            }
-        )
-    assert exc.value.code == "env_alias_conflict"
-
-
-def test_legacy_shiyi_config_section_is_accepted(tmp_path: Path):
-    config_file = tmp_path / "legacy.toml"
-    config_file.write_text(
-        '[shiyi]\nsessions_dir = "/srv/legacy/sessions"\nchunk_tokens = 300\n',
-        encoding="utf-8",
-    )
-    settings = load_config(environ={"SHIORI_CONFIG_FILE": str(config_file)})
-
-    assert settings.sessions_dir == Path("/srv/legacy/sessions")
-    assert settings.chunk_tokens == 300
-
-
-def test_legacy_config_section_with_canonical_env_fails_closed(tmp_path: Path):
-    """Legacy [shiyi] file section + canonical SHIORI_* env for the same field
-    must fail closed (Phase 4A cross-source conflict)."""
-    config_file = tmp_path / "legacy.toml"
-    config_file.write_text('[shiyi]\nsessions_dir = "/srv/legacy/sessions"\n', encoding="utf-8")
-    with pytest.raises(ConfigError) as exc:
-        load_config(
-            config_path=config_file,
-            environ={"SHIORI_SESSIONS_DIR": "/srv/shiori/sessions"},
-        )
-    assert exc.value.code == "config_source_conflict"
-
-
-def test_legacy_config_section_with_canonical_env_different_field_ok(tmp_path: Path):
-    """A legacy [shiyi] section may coexist with canonical SHIORI_* env when
-    they set different fields; only same-field conflicts fail closed."""
-    config_file = tmp_path / "legacy.toml"
-    config_file.write_text(
-        '[shiyi]\nsessions_dir = "/srv/legacy/sessions"\nchunk_tokens = 300\n',
-        encoding="utf-8",
-    )
-    settings = load_config(
-        config_path=config_file,
-        environ={"SHIORI_VOYAGE_API_URL": "https://api.example.test/v1/embeddings"},
-    )
-    assert settings.sessions_dir == Path("/srv/legacy/sessions")
-    assert settings.chunk_tokens == 300
-    assert settings.voyage_api_url == "https://api.example.test/v1/embeddings"
-
-
-def test_legacy_config_section_with_legacy_env_is_compatible(tmp_path: Path):
-    """Legacy [shiyi] file section + legacy SHIYI_* env for the same field are
-    both old inputs and must remain compatible (env wins), not fail."""
-    config_file = tmp_path / "legacy.toml"
-    config_file.write_text('[shiyi]\nsessions_dir = "/srv/legacy-file"\n', encoding="utf-8")
-    settings = load_config(
-        config_path=config_file,
-        environ={"SHIYI_SESSIONS_DIR": "/srv/legacy-env"},
-    )
-    assert settings.sessions_dir == Path("/srv/legacy-env")
-
-
-def test_canonical_config_section_with_legacy_env_fails_closed(tmp_path: Path):
-    """Canonical [shiori] file section + legacy SHIYI_* env for the same field
-    must fail closed."""
-    config_file = tmp_path / "canonical.toml"
-    config_file.write_text('[shiori]\nsessions_dir = "/srv/canonical"\n', encoding="utf-8")
-    with pytest.raises(ConfigError) as exc:
-        load_config(
-            config_path=config_file,
-            environ={"SHIYI_SESSIONS_DIR": "/srv/legacy"},
-        )
-    assert exc.value.code == "env_alias_conflict"
-
-
-def test_canonical_and_legacy_config_sections_fail_closed(tmp_path: Path):
-    config_file = tmp_path / "conflict.toml"
-    config_file.write_text(
-        '[shiori]\nsessions_dir = "/srv/shiori/sessions"\n[shiyi]\nsessions_dir = "/srv/legacy/sessions"\n',
-        encoding="utf-8",
-    )
-    with pytest.raises(ConfigError) as exc:
-        load_config(environ={"SHIORI_CONFIG_FILE": str(config_file)})
-    assert exc.value.code == "config_section_conflict"
-
-
-def test_canonical_and_legacy_config_file_env_conflict_fails_closed(tmp_path: Path):
-    legacy = tmp_path / "legacy.toml"
-    legacy.write_text('[shiyi]\nchunk_tokens = 300\n', encoding="utf-8")
-    canonical = tmp_path / "canonical.toml"
-    canonical.write_text('[shiori]\nchunk_tokens = 400\n', encoding="utf-8")
-
-    with pytest.raises(ConfigError) as exc:
-        load_config(
-            environ={
-                "SHIORI_CONFIG_FILE": str(canonical),
-                "SHIYI_CONFIG_FILE": str(legacy),
-            }
-        )
-    assert exc.value.code == "config_file_conflict"
-
-
-def test_legacy_shiyi_fake_model_namespace_still_accepted():
-    settings = load_config(
-        environ={
-            "SHIORI_EMBEDDING_PROVIDER": "fake",
-            "SHIORI_ENVIRONMENT": "test",
-            "SHIORI_ALLOW_FAKE_EMBEDDINGS": "true",
-            "SHIYI_VOYAGE_MODEL": "shiyi-fake-v1",
-            "SHIORI_EMBED_DIM": "1024",
-        }
-    )
-    settings.require_embedding()
-    assert settings.voyage_model == "shiyi-fake-v1"
