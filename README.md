@@ -217,9 +217,8 @@ Release evidence is separated into these gates:
 | reachable history/artifact secret and PII audit | `uv run python tools/release_audit.py` | required | — |
 | pinned Docker build and HIGH/CRITICAL scan | requires Docker | required | when Docker is unavailable |
 
-The private release candidate is not a public release: CI does not create a
-tag, publish a package, push an image, deploy, register an external service,
-or change repository visibility.
+The release candidate is not a published release: CI does not create a tag,
+publish a package, push an image, deploy, or register an external service.
 The complete gate list and known limitations are recorded in
 `maintainers/RELEASE_CHECKLIST.md`.
 

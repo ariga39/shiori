@@ -1,12 +1,12 @@
 ---
-title: "shiori v0.1.0 private release-candidate checklist"
+title: "shiori v0.1.0 release-candidate checklist"
 description: This is a release-candidate checklist, not a release authorization.
 slug: RELEASE_CHECKLIST
 ---
 
 This is a release-candidate checklist, not a release authorization. The
-repository remains private until the owner makes a separate visibility
-decision. Do not create a tag or release, publish a package, push an image,
+repository is now public, but publication itself authorizes nothing.
+Do not create a tag or release, publish a package, push an image,
 deploy, register an external service, or write to production as part of this
 checklist.
 
@@ -74,9 +74,9 @@ checklist.
 
 ## Known limitations
 
-- The private candidate does not authorize deployment, external registration,
-  production writes, package publication, image publication, or visibility
-  changes.
+- The release candidate does not authorize deployment, external registration,
+  production writes, package publication, image publication, or further
+  visibility changes.
 - A production embedding service/key is required for real semantic ingest;
   deterministic vectors are only for isolated development/test smoke runs.
 - The project uses pair-programming review with an exact-head protected merge;
